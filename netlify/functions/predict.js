@@ -12,6 +12,14 @@ export default async (req) => {
   try {
     const body = await req.json()
 
+    // Trim messages to avoid hitting limits
+    const messages = body.messages.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string'
+        ? m.content.slice(0, 8000)
+        : m.content
+    }))
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -22,10 +30,21 @@ export default async (req) => {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 4000,
-        messages: body.messages,
         system: body.system,
+        messages,
       }),
     })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return new Response(JSON.stringify({ error: errText }), {
+        status: response.status,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        }
+      })
+    }
 
     const data = await response.json()
 
@@ -35,6 +54,7 @@ export default async (req) => {
         'Access-Control-Allow-Origin': '*',
       }
     })
+
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
