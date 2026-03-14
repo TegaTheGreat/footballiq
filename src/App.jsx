@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Trophy, Send, RefreshCw, Newspaper } from 'lucide-react'
+import { Trophy, Send, RefreshCw } from 'lucide-react'
 
 const QUICK_QUESTIONS = [
   "What are the most predictable matches this weekend?",
@@ -14,45 +14,41 @@ const QUICK_QUESTIONS = [
   "Which underdogs could cause upsets this weekend?",
 ]
 
-const SYSTEM_PROMPT = `You are FootballIQ, an elite football analyst and prediction AI with access to real live data including:
-- Current league standings and form
-- Recent match results with half-time and full-time scores
-- Upcoming fixtures across 16+ leagues
-- Latest football news including injuries and transfers
+const SYSTEM_PROMPT = `You are FootballIQ, an elite football analyst and prediction AI with access to real live data including current league standings, recent match results, upcoming fixtures and latest football news.
 
 When analyzing matches always consider:
 - Current league position and points
 - Recent form (last 5 matches shown as W/D/L)
 - Goals scored and conceded home and away
-- Half time vs full time scoring patterns from recent results
-- Head to head from recent results data
-- Home advantage (home win %, home goals)
-- Away performance (away win %, away goals)
-- Latest news about injuries, suspensions, transfers
+- Half time vs full time scoring patterns
+- Head to head from recent results
+- Home advantage statistics
+- Latest news about injuries and suspensions
 
-When asked for predictions always provide:
-- Winner prediction with confidence %
-- Predicted scoreline
-- Which half most likely to see goals
-- Clean sheet probability for each team
-- Best betting markets (1X2, BTTS, Over/Under, Correct Score)
-- Risk level (Low/Medium/High)
-- Key reasoning based on real data
+IMPORTANT FORMATTING RULES:
+- Always use HTML tables for presenting multiple matches or predictions
+- Use this exact table format for predictions:
+<table>
+  <thead>
+    <tr><th>Match</th><th>Prediction</th><th>Score</th><th>Confidence</th><th>Best Bet</th><th>Risk</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Home vs Away</td><td>Home Win</td><td>2-1</td><td>75%</td><td>Home Win & Over 2.5</td><td>Low</td></tr>
+  </tbody>
+</table>
 
-When asked for top bets or accumulators:
-- Rank by confidence level
-- Mix different bet types
-- Flag high risk picks clearly
-- Suggest 3-4 team accumulators
-
-Format responses with emojis, bold text and clear sections.
-Always end with a responsible gambling reminder.`
+- Use tables for standings, comparisons and any list of matches
+- Use **bold** for key insights
+- Use clear sections with headers
+- Be comprehensive and detailed in analysis
+- Do not cut responses short — always complete the full analysis
+- Always end with a responsible gambling reminder`
 
 export default function App() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: `👋 Welcome to **FootballIQ** — your AI football prediction engine!\n\nI'm now loading:\n📅 Upcoming fixtures across 16+ leagues\n📊 Live standings and team form\n⚽ Recent results and scoring patterns\n📰 Latest football news and injuries\n\n⏳ Give me a few seconds...`
+      content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>I'm now loading:<br/>📅 Upcoming fixtures across 16+ leagues<br/>📊 Live standings and team form<br/>⚽ Recent results and scoring patterns<br/>📰 Latest football news and injuries<br/><br/>⏳ Give me a few seconds...`
     }
   ])
   const [input, setInput] = useState('')
@@ -99,7 +95,6 @@ export default function App() {
       setDataReady(true)
       setDataStatus('ready')
 
-      // Build status message
       const teamsCount = Object.keys(profiles).length
       const newsCount = articles.length
 
@@ -109,18 +104,25 @@ export default function App() {
         })
         const homeP = profiles[m.homeTeam]
         const awayP = profiles[m.awayTeam]
-        const homePos = homeP ? ` (${homeP.position}th, ${homeP.form})` : ''
-        const awayPos = awayP ? ` (${awayP.position}th, ${awayP.form})` : ''
-        return `• **${m.homeTeam}**${homePos} vs **${m.awayTeam}**${awayPos} — ${date} [${m.competition}]`
-      }).join('\n')
+        const homePos = homeP ? ` (${homeP.position}th)` : ''
+        const awayPos = awayP ? ` (${awayP.position}th)` : ''
+        return `• <strong>${m.homeTeam}</strong>${homePos} vs <strong>${m.awayTeam}</strong>${awayPos} — ${date} [${m.competition}]`
+      }).join('<br/>')
 
       const newsPreview = articles.slice(0, 3).map(n =>
         `• ${n.title}`
-      ).join('\n')
+      ).join('<br/>')
 
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `✅ **All data loaded and ready!**\n\n📅 **${matches.length} upcoming fixtures** across all leagues\n📊 **${teamsCount} team profiles** with live standings and form\n⚽ **${results.length} recent results** for pattern analysis\n📰 **${newsCount} news articles** including injuries and transfers\n\n**Upcoming fixtures:**\n${upcomingPreview}${matches.length > 5 ? `\n*...and ${matches.length - 5} more*` : ''}\n\n**Latest news:**\n${newsPreview || 'No news loaded'}\n\n**Ask me anything about this weekend! 👇**`
+        content: `✅ <strong>All data loaded and ready!</strong><br/><br/>
+📅 <strong>${matches.length} upcoming fixtures</strong> across all leagues<br/>
+📊 <strong>${teamsCount} team profiles</strong> with live standings and form<br/>
+⚽ <strong>${results.length} recent results</strong> for pattern analysis<br/>
+📰 <strong>${newsCount} news articles</strong> including injuries and transfers<br/><br/>
+<strong>Upcoming fixtures:</strong><br/>${upcomingPreview}${matches.length > 5 ? `<br/><em>...and ${matches.length - 5} more</em>` : ''}<br/><br/>
+<strong>Latest news:</strong><br/>${newsPreview || 'No news loaded'}<br/><br/>
+<strong>Ask me anything about this weekend! 👇</strong>`
       }])
 
     } catch (err) {
@@ -128,7 +130,7 @@ export default function App() {
       setDataReady(true)
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `⚠️ Some data couldn't load but I'm still operational!\n\nYou can ask me about any match and I'll use my football knowledge to analyze it. For best results mention:\n• The teams playing\n• The league\n• Any context you know (injuries, form, head to head)\n\n**What would you like to know? 👇**`
+        content: `⚠️ Some data couldn't load but I'm still operational!<br/><br/>Ask me about any match and I'll analyze it using my football knowledge. For best results mention the teams, league and any context you know.<br/><br/><strong>What would you like to know? 👇</strong>`
       }])
     }
   }
@@ -140,7 +142,8 @@ export default function App() {
       context += `\n\n=== UPCOMING FIXTURES (Next 7 days) ===\n`
       context += fixtures.slice(0, 60).map(m => {
         const date = new Date(m.date).toLocaleDateString('en-GB', {
-          weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+          weekday: 'short', day: 'numeric', month: 'short',
+          hour: '2-digit', minute: '2-digit'
         })
         const homeP = teamProfiles[m.homeTeam]
         const awayP = teamProfiles[m.awayTeam]
@@ -152,9 +155,11 @@ export default function App() {
     }
 
     if (recentResults.length > 0) {
-      context += `\n\n=== RECENT RESULTS (Last 100 matches) ===\n`
+      context += `\n\n=== RECENT RESULTS ===\n`
       context += recentResults.map(r => {
-        const date = new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+        const date = new Date(r.date).toLocaleDateString('en-GB', {
+          day: 'numeric', month: 'short'
+        })
         return `${date}: ${r.home} ${r.homeScore}-${r.awayScore} ${r.away} (HT:${r.halfTimeHome ?? '?'}-${r.halfTimeAway ?? '?'}) [${r.competition}]`
       }).join('\n')
     }
@@ -162,12 +167,12 @@ export default function App() {
     if (news.length > 0) {
       context += `\n\n=== LATEST FOOTBALL NEWS ===\n`
       context += news.slice(0, 20).map(n =>
-        `[${n.category}] ${n.title}${n.summary ? ': ' + n.summary.slice(0, 100) : ''}`
+        `[${n.category}] ${n.title}${n.summary ? ': ' + n.summary.slice(0, 150) : ''}`
       ).join('\n')
     }
 
     if (Object.keys(teamProfiles).length > 0) {
-      context += `\n\n=== LEAGUE STANDINGS (Top 10 per league) ===\n`
+      context += `\n\n=== LEAGUE STANDINGS ===\n`
       const leagueGroups = {}
       Object.entries(teamProfiles).forEach(([team, data]) => {
         if (!leagueGroups[data.league]) leagueGroups[data.league] = []
@@ -175,7 +180,7 @@ export default function App() {
       })
       Object.entries(leagueGroups).forEach(([league, teams]) => {
         context += `\n${league}:\n`
-        teams.sort((a, b) => a.position - b.position).slice(0, 10).forEach(t => {
+        teams.sort((a, b) => a.position - b.position).slice(0, 12).forEach(t => {
           context += `  ${t.position}. ${t.team} - ${t.points}pts GF${t.goalsFor} GA${t.goalsAgainst} Form:${t.form}\n`
         })
       })
@@ -198,15 +203,13 @@ export default function App() {
       const context = buildContext()
 
       const conversationHistory = messages
-        .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.content.includes('loading')))
+        .filter(m => m.role === 'user' ||
+          (m.role === 'assistant' && !m.content.includes('loading')))
         .map(m => ({ role: m.role, content: m.content }))
 
       const messagesPayload = [
         ...conversationHistory,
-        {
-          role: 'user',
-          content: `${text}\n\n${context}`
-        }
+        { role: 'user', content: `${text}\n\n${context}` }
       ]
 
       const response = await fetch('/api/predict', {
@@ -221,12 +224,18 @@ export default function App() {
       const data = await response.json()
 
       if (data.content && data.content[0]) {
+        const rawText = data.content[0].text
+        const formatted = rawText
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/\n/g, '<br/>')
+
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: data.content[0].text
+          content: formatted
         }])
       } else {
-        throw new Error(data.error?.message || 'Invalid response from AI')
+        throw new Error(data.error?.message || 'Invalid response')
       }
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -238,39 +247,42 @@ export default function App() {
     }
   }
 
-  const formatMessage = (content) => {
-    return content
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/\n/g, '<br/>')
-  }
-
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', flexDirection: 'column' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: '#f8faff',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
       {/* Header */}
       <header style={{
-        borderBottom: '1px solid #1a1a3e',
-        padding: '16px 24px',
+        borderBottom: '1px solid #e2e8f0',
+        padding: '14px 24px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        background: 'rgba(10,10,15,0.95)',
-        backdropFilter: 'blur(10px)',
+        background: '#ffffff',
+        boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
+        position: 'sticky',
+        top: 0,
         zIndex: 100,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
-            width: 36, height: 36, borderRadius: '10px',
-            background: 'linear-gradient(135deg, #00ff87, #60efff)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
+            width: 38, height: 38, borderRadius: '10px',
+            background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 8px rgba(59,130,246,0.3)',
           }}>
-            <Trophy size={20} color="#0a0a0f" />
+            <Trophy size={20} color="#ffffff" />
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-0.5px' }}>
+            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-0.5px', color: '#1a1a2e' }}>
               Football<span className="gradient-text">IQ</span>
             </div>
-            <div style={{ fontSize: 11, color: '#666', marginTop: -2 }}>AI Match Predictor</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: -2 }}>
+              AI Match Predictor
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -279,17 +291,20 @@ export default function App() {
             dataStatus === 'ready' && fixtures.length > 0 ? 'badge-green' :
             dataStatus === 'ready' ? 'badge-blue' : 'badge-red'
           }`}>
-            {dataStatus === 'loading' ? '⏳ Loading data...' :
-             dataStatus === 'ready' && fixtures.length > 0 ? `✅ ${fixtures.length} fixtures | ${news.length} news` :
-             dataStatus === 'ready' ? 'ℹ️ Knowledge mode' : '⚠️ Limited data'}
+            {dataStatus === 'loading' ? '⏳ Loading...' :
+             dataStatus === 'ready' && fixtures.length > 0
+               ? `✅ ${fixtures.length} fixtures | ${news.length} news`
+               : dataStatus === 'ready' ? 'ℹ️ Knowledge mode' : '⚠️ Limited data'}
           </span>
           <button
             onClick={loadAllData}
             style={{
-              background: 'transparent', border: '1px solid #1a1a3e',
-              borderRadius: 8, padding: '6px 10px', cursor: 'pointer',
-              color: '#666', display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: 12,
+              background: '#f8faff',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8, padding: '6px 12px',
+              cursor: 'pointer', color: '#64748b',
+              display: 'flex', alignItems: 'center',
+              gap: 6, fontSize: 12, fontWeight: 500,
             }}
           >
             <RefreshCw size={12} /> Refresh
@@ -299,10 +314,10 @@ export default function App() {
 
       {/* Quick Questions */}
       <div style={{
-        borderBottom: '1px solid #1a1a3e',
-        padding: '12px 24px',
-        display: 'flex', gap: 8, overflowX: 'auto',
-        background: '#0d0d18',
+        borderBottom: '1px solid #e2e8f0',
+        padding: '10px 24px',
+        display: 'flex', gap: 8,
+        overflowX: 'auto', background: '#ffffff',
       }}>
         {QUICK_QUESTIONS.map((q, i) => (
           <button
@@ -310,20 +325,24 @@ export default function App() {
             onClick={() => sendMessage(q)}
             disabled={loading}
             style={{
-              background: 'rgba(0,255,135,0.05)',
-              border: '1px solid rgba(0,255,135,0.15)',
-              color: '#888', borderRadius: 20,
-              padding: '6px 14px', fontSize: 12,
-              cursor: 'pointer', whiteSpace: 'nowrap',
-              flexShrink: 0, transition: 'all 0.2s',
+              background: '#f0f7ff',
+              border: '1px solid #bfdbfe',
+              color: '#1d4ed8',
+              borderRadius: 20,
+              padding: '6px 14px',
+              fontSize: 12, fontWeight: 500,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              transition: 'all 0.2s',
             }}
             onMouseOver={e => {
-              e.target.style.color = '#00ff87'
-              e.target.style.borderColor = 'rgba(0,255,135,0.4)'
+              e.target.style.background = '#dbeafe'
+              e.target.style.borderColor = '#3b82f6'
             }}
             onMouseOut={e => {
-              e.target.style.color = '#888'
-              e.target.style.borderColor = 'rgba(0,255,135,0.15)'
+              e.target.style.background = '#f0f7ff'
+              e.target.style.borderColor = '#bfdbfe'
             }}
           >
             {q}
@@ -334,64 +353,81 @@ export default function App() {
       {/* Messages */}
       <div style={{
         flex: 1, overflowY: 'auto',
-        padding: '24px',
-        display: 'flex', flexDirection: 'column', gap: 16,
-        maxWidth: 900, width: '100%', margin: '0 auto',
+        padding: '24px 16px',
+        display: 'flex', flexDirection: 'column',
+        gap: 16, maxWidth: 960,
+        width: '100%', margin: '0 auto',
       }}>
         {messages.map((msg, i) => (
           <div key={i} style={{
             display: 'flex',
             justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            alignItems: 'flex-start',
+            gap: 10,
           }}>
             {msg.role === 'assistant' && (
               <div style={{
-                width: 32, height: 32, borderRadius: '10px',
-                background: 'linear-gradient(135deg, #00ff87, #60efff)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                marginRight: 10, flexShrink: 0, marginTop: 4,
+                width: 34, height: 34, borderRadius: '10px',
+                background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'center', flexShrink: 0,
+                boxShadow: '0 2px 8px rgba(59,130,246,0.2)',
               }}>
-                <Trophy size={16} color="#0a0a0f" />
+                <Trophy size={16} color="#fff" />
               </div>
             )}
             <div
               style={{
-                maxWidth: '80%',
+                maxWidth: msg.role === 'assistant' ? '90%' : '75%',
                 background: msg.role === 'user'
-                  ? 'linear-gradient(135deg, #00ff87, #60efff)'
-                  : '#16213e',
-                color: msg.role === 'user' ? '#0a0a0f' : '#fff',
+                  ? 'linear-gradient(135deg, #1d4ed8, #3b82f6)'
+                  : '#ffffff',
+                color: msg.role === 'user' ? '#ffffff' : '#1e293b',
                 borderRadius: msg.role === 'user'
                   ? '18px 18px 4px 18px'
-                  : '18px 18px 18px 4px',
+                  : '4px 18px 18px 18px',
                 padding: '14px 18px',
                 fontSize: 14,
-                lineHeight: 1.6,
-                border: msg.role === 'assistant' ? '1px solid #1a1a3e' : 'none',
+                lineHeight: 1.7,
+                border: msg.role === 'assistant'
+                  ? '1px solid #e2e8f0' : 'none',
+                boxShadow: msg.role === 'assistant'
+                  ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+                overflowX: 'auto',
               }}
-              dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
+              dangerouslySetInnerHTML={{ __html: msg.content }}
             />
           </div>
         ))}
 
         {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10
+          }}>
             <div style={{
-              width: 32, height: 32, borderRadius: '10px',
-              background: 'linear-gradient(135deg, #00ff87, #60efff)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 34, height: 34, borderRadius: '10px',
+              background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(59,130,246,0.2)',
             }}>
-              <Trophy size={16} color="#0a0a0f" />
+              <Trophy size={16} color="#fff" />
             </div>
             <div style={{
-              background: '#16213e', border: '1px solid #1a1a3e',
-              borderRadius: '18px 18px 18px 4px',
-              padding: '14px 18px', display: 'flex', gap: 6, alignItems: 'center'
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderRadius: '4px 18px 18px 18px',
+              padding: '14px 20px',
+              display: 'flex', gap: 6,
+              alignItems: 'center',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
             }}>
-              {[0, 1, 2].map(i => (
-                <div key={i} style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: '#00ff87',
-                  animation: `bounce 1s ease infinite ${i * 0.2}s`,
+              {[0, 1, 2].map(j => (
+                <div key={j} style={{
+                  width: 8, height: 8,
+                  borderRadius: '50%',
+                  background: '#3b82f6',
+                  animation: `bounce 1s ease infinite ${j * 0.2}s`,
                 }} />
               ))}
             </div>
@@ -402,14 +438,15 @@ export default function App() {
 
       {/* Input */}
       <div style={{
-        borderTop: '1px solid #1a1a3e',
+        borderTop: '1px solid #e2e8f0',
         padding: '16px 24px',
-        background: 'rgba(10,10,15,0.95)',
-        backdropFilter: 'blur(10px)',
+        background: '#ffffff',
+        boxShadow: '0 -1px 8px rgba(0,0,0,0.04)',
       }}>
         <div style={{
-          maxWidth: 900, margin: '0 auto',
-          display: 'flex', gap: 12, alignItems: 'flex-end',
+          maxWidth: 960, margin: '0 auto',
+          display: 'flex', gap: 12,
+          alignItems: 'flex-end',
         }}>
           <textarea
             value={input}
@@ -423,23 +460,31 @@ export default function App() {
             placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Analyze Arsenal vs Chelsea'"
             className="input-field"
             rows={2}
-            style={{ flex: 1, resize: 'none', borderRadius: 12 }}
+            style={{
+              flex: 1, resize: 'none',
+              borderRadius: 12, lineHeight: 1.5,
+            }}
           />
           <button
             onClick={() => sendMessage()}
             disabled={loading || !input.trim()}
             className="btn-primary"
             style={{
-              padding: '12px 20px', borderRadius: 12,
+              padding: '12px 20px',
+              borderRadius: 12,
               opacity: loading || !input.trim() ? 0.5 : 1,
               display: 'flex', alignItems: 'center', gap: 8,
+              flexShrink: 0,
             }}
           >
             <Send size={18} />
           </button>
         </div>
-        <div style={{ textAlign: 'center', color: '#333', fontSize: 11, marginTop: 8 }}>
-          FootballIQ • Live data • Please gamble responsibly 🎗️
+        <div style={{
+          textAlign: 'center', color: '#94a3b8',
+          fontSize: 11, marginTop: 10,
+        }}>
+          FootballIQ • Powered by Claude AI • Please gamble responsibly 🎗️
         </div>
       </div>
 
@@ -447,6 +492,11 @@ export default function App() {
         @keyframes bounce {
           0%, 60%, 100% { transform: translateY(0); }
           30% { transform: translateY(-8px); }
+        }
+        table { margin: 12px 0; }
+        @media (max-width: 600px) {
+          table { font-size: 11px; }
+          thead th, tbody td { padding: 8px 10px; }
         }
       `}</style>
     </div>
