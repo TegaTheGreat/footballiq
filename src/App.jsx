@@ -1,144 +1,189 @@
-import { useState } from 'react'
-import { Trophy, TrendingUp, Shield, Zap } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Trophy, Send, Zap, TrendingUp, Shield, RefreshCw } from 'lucide-react'
 
-const LEAGUES = [
-  { id: 'PL', name: 'Premier League', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 England' },
-  { id: 'ELC', name: 'Championship', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 England' },
-  { id: 'EL1', name: 'League One', country: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 England' },
-  { id: 'BSA', name: 'Série A', country: '🇧🇷 Brazil' },
-  { id: 'SA', name: 'Serie A', country: '🇮🇹 Italy' },
-  { id: 'PD', name: 'La Liga', country: '🇪🇸 Spain' },
-  { id: 'BL1', name: 'Bundesliga', country: '🇩🇪 Germany' },
-  { id: 'FL1', name: 'Ligue 1', country: '🇫🇷 France' },
-  { id: 'SPL', name: 'Scottish Premiership', country: '🏴󠁧󠁢󠁳󠁣󠁴󠁿 Scotland' },
-  { id: 'DED', name: 'Eredivisie', country: '🇳🇱 Netherlands' },
-  { id: 'PPL', name: 'Primeira Liga', country: '🇵🇹 Portugal' },
-  { id: 'BEL', name: 'Pro League', country: '🇧🇪 Belgium' },
-  { id: 'SAU', name: 'Saudi Pro League', country: '🇸🇦 Saudi Arabia' },
-  { id: 'ARG', name: 'Primera División', country: '🇦🇷 Argentina' },
-  { id: 'MX1', name: 'Liga MX', country: '🇲🇽 Mexico' },
-  { id: 'CL', name: 'Champions League', country: '🌍 Europe' },
-  { id: 'EL', name: 'Europa League', country: '🌍 Europe' },
-  { id: 'COPA', name: 'Copa America', country: '🌎 Americas' },
+const QUICK_QUESTIONS = [
+  "What are the most predictable matches this weekend?",
+  "Give me the top 20 best bets for this week",
+  "Which matches are most likely to have over 2.5 goals?",
+  "Best clean sheet predictions this weekend?",
+  "Which home teams are most likely to win this week?",
+  "What are the safest accumulators for this weekend?",
+  "Which matches are likely to be high scoring?",
+  "Best both teams to score predictions this week?",
 ]
 
-const PREDICTION_CONTEXTS = [
-  'Last 5 match results',
-  'Head to head history',
-  'Home/Away form',
-  'Goals scored per half',
-  'Clean sheet record',
-  'Key injuries/suspensions',
-  'Playing style',
-  'Recent news',
-]
+const SYSTEM_PROMPT = `You are FootballIQ, an expert football analyst and betting prediction AI. You have deep knowledge of:
+- Premier League, Championship, League One (England)
+- La Liga (Spain), Serie A (Italy), Bundesliga (Germany), Ligue 1 (France)
+- Primeira Liga (Portugal), Eredivisie (Netherlands), Pro League (Belgium)
+- Scottish Premiership, Austrian Bundesliga, Saudi Pro League
+- Champions League, Europa League, Conference League
+- Copa America, Copa Libertadores
+- Brazilian Série A, Argentine Primera División, Liga MX
+
+When given fixtures data, analyze each match considering:
+- Historical head to head records
+- Current form (last 5 matches)
+- Home and away performance
+- Goals scoring patterns (first half vs second half)
+- Clean sheet records
+- League table positions
+- Key player availability
+- Tactical matchups
+
+Always provide:
+- Clear winner prediction with confidence percentage
+- Predicted scoreline
+- Goal timing predictions (which half most likely)
+- Clean sheet probabilities
+- Best betting markets for each match
+- Risk level (Low/Medium/High)
+
+Format your responses clearly with emojis and structure. Be confident but note when predictions carry higher risk. Always add a responsible gambling reminder at the end.`
 
 export default function App() {
-  const [screen, setScreen] = useState('home')
-  const [selectedLeague, setSelectedLeague] = useState('')
-  const [homeTeam, setHomeTeam] = useState('')
-  const [awayTeam, setAwayTeam] = useState('')
-  const [context, setContext] = useState('')
-  const [prediction, setPrediction] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: `👋 Welcome to **FootballIQ** — your AI football prediction engine!
 
-  const getPrediction = async () => {
-    if (!homeTeam || !awayTeam || !selectedLeague) {
-      setError('Please fill in all fields')
-      return
+I can analyze upcoming fixtures and give you:
+- 🏆 Match predictions with confidence ratings
+- ⚽ Scoreline and goal timing predictions  
+- 🧤 Clean sheet probabilities
+- 💰 Best betting markets and accumulators
+- 📊 Top 20 most predictable results
+
+**Try asking me anything below, or click one of the quick questions to get started!**
+
+*Loading this weekend's fixtures...*`
     }
-    setError('')
+  ])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [fixtures, setFixtures] = useState([])
+  const [fixturesLoading, setFixturesLoading] = useState(true)
+  const [fixturesError, setFixturesError] = useState('')
+  const messagesEndRef = useRef(null)
+
+  useEffect(() => {
+    fetchFixtures()
+  }, [])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const fetchFixtures = async () => {
+    setFixturesLoading(true)
+    setFixturesError('')
+    try {
+      const response = await fetch('/api/fixtures')
+      const data = await response.json()
+      if (data.matches) {
+        setFixtures(data.matches)
+        // Auto send fixtures to chat
+        if (data.matches.length > 0) {
+          const fixturesSummary = data.matches.slice(0, 50).map(m => {
+            const date = new Date(m.utcDate).toLocaleDateString('en-GB', {
+              weekday: 'short', day: 'numeric', month: 'short'
+            })
+            return `${date}: ${m.homeTeam.name} vs ${m.awayTeam.name} (${m.competition.name})`
+          }).join('\n')
+
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `✅ **Fixtures loaded!** I've found **${data.matches.length} upcoming matches** across all major leagues.\n\nHere's a preview of what's coming up:\n\n${data.matches.slice(0, 5).map(m => {
+              const date = new Date(m.utcDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+              return `• **${m.homeTeam.name}** vs **${m.awayTeam.name}** — ${date} (${m.competition.name})`
+            }).join('\n')}\n\n*...and ${data.matches.length - 5} more matches loaded.*\n\n**What would you like to know? Ask me anything about these fixtures!**`
+          }])
+        } else {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `ℹ️ No fixtures found for the next 7 days in the database yet. This sometimes happens early in the week before fixtures are confirmed.\n\n**You can still ask me questions!** Just mention the teams you're interested in and I'll analyze them for you.`
+          }])
+        }
+      }
+    } catch (err) {
+      setFixturesError('Could not load fixtures automatically')
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `⚠️ Couldn't auto-load fixtures right now, but I'm still fully operational! Just ask me about any match or tell me the fixtures you want analyzed and I'll give you the full breakdown.`
+      }])
+    } finally {
+      setFixturesLoading(false)
+    }
+  }
+
+  const sendMessage = async (messageText) => {
+    const text = messageText || input.trim()
+    if (!text || loading) return
+
+    setInput('')
     setLoading(true)
-    setPrediction(null)
+
+    const fixturesSummary = fixtures.length > 0
+      ? `\n\nHere are the upcoming fixtures I have loaded:\n${fixtures.slice(0, 50).map(m => {
+          const date = new Date(m.utcDate).toLocaleDateString('en-GB', {
+            weekday: 'short', day: 'numeric', month: 'short'
+          })
+          return `${date}: ${m.homeTeam.name} vs ${m.awayTeam.name} (${m.competition.name})`
+        }).join('\n')}`
+      : ''
+
+    const userMessage = { role: 'user', content: text }
+    setMessages(prev => [...prev, userMessage])
 
     try {
-      const league = LEAGUES.find(l => l.id === selectedLeague)
-      const prompt = `You are an expert football analyst and predictor. Analyze this upcoming match and provide a detailed prediction.
+      const conversationMessages = [
+        ...messages.filter(m => m.role !== 'assistant' || !m.content.includes('Loading this weekend')),
+        userMessage
+      ].map(m => ({
+        role: m.role,
+        content: m.role === 'user' && m === userMessage
+          ? `${text}${fixturesSummary}`
+          : m.content
+      }))
 
-MATCH: ${homeTeam} vs ${awayTeam}
-LEAGUE: ${league?.name} (${league?.country})
-ADDITIONAL CONTEXT: ${context || 'No additional context provided'}
-
-Respond ONLY with this exact JSON, no extra text:
-{
-  "match": "${homeTeam} vs ${awayTeam}",
-  "league": "${league?.name}",
-  "prediction": {
-    "winner": "either '${homeTeam}', '${awayTeam}', or 'Draw'",
-    "confidence": 75,
-    "predicted_score": "2-1",
-    "home_win_probability": 55,
-    "draw_probability": 25,
-    "away_win_probability": 20
-  },
-  "goals": {
-    "total_goals_expected": 2.5,
-    "both_teams_to_score": "Yes",
-    "over_2_5": "Yes",
-    "first_half_goals": 1.1,
-    "second_half_goals": 1.4,
-    "most_likely_scoring_half": "Second Half"
-  },
-  "clean_sheets": {
-    "home_clean_sheet_probability": 30,
-    "away_clean_sheet_probability": 20
-  },
-  "key_insights": [
-    "insight 1",
-    "insight 2",
-    "insight 3",
-    "insight 4"
-  ],
-  "best_bets": [
-    "bet suggestion 1",
-    "bet suggestion 2",
-    "bet suggestion 3"
-  ],
-  "risk_level": "Medium"
-}`
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch('/api/predict', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': import.meta.env.VITE_ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: prompt }],
+          system: SYSTEM_PROMPT,
+          messages: conversationMessages,
         }),
       })
 
       const data = await response.json()
-      const text = data.content[0].text
-      const clean = text.replace(/```json|```/g, '').trim()
-      const parsed = JSON.parse(clean)
-      setPrediction(parsed)
-      setScreen('result')
+
+      if (data.content && data.content[0]) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: data.content[0].text
+        }])
+      } else {
+        throw new Error('Invalid response')
+      }
     } catch (err) {
-      setError('Something went wrong. Check your API key and try again.')
-      console.error(err)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: '⚠️ Something went wrong. Please try again.'
+      }])
     } finally {
       setLoading(false)
     }
   }
 
-  const resetApp = () => {
-    setScreen('home')
-    setPrediction(null)
-    setHomeTeam('')
-    setAwayTeam('')
-    setSelectedLeague('')
-    setContext('')
-    setError('')
+  const formatMessage = (content) => {
+    return content
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\n/g, '<br/>')
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0f' }}>
+    <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <header style={{
         borderBottom: '1px solid #1a1a3e',
@@ -146,8 +191,6 @@ Respond ONLY with this exact JSON, no extra text:
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
         background: 'rgba(10,10,15,0.95)',
         backdropFilter: 'blur(10px)',
         zIndex: 100,
@@ -167,321 +210,179 @@ Respond ONLY with this exact JSON, no extra text:
             <div style={{ fontSize: 11, color: '#666', marginTop: -2 }}>AI Match Predictor</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <span className="badge badge-green">⚡ AI Powered</span>
-          <span className="badge badge-blue">🌍 {LEAGUES.length} Leagues</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {fixturesLoading ? (
+            <span className="badge badge-blue">⏳ Loading fixtures...</span>
+          ) : fixtures.length > 0 ? (
+            <span className="badge badge-green">✅ {fixtures.length} fixtures loaded</span>
+          ) : (
+            <span className="badge badge-red">⚠️ No fixtures</span>
+          )}
+          <button
+            onClick={fetchFixtures}
+            style={{
+              background: 'transparent', border: '1px solid #1a1a3e',
+              borderRadius: 8, padding: '6px 10px', cursor: 'pointer',
+              color: '#666', display: 'flex', alignItems: 'center', gap: 4,
+              fontSize: 12,
+            }}
+          >
+            <RefreshCw size={12} /> Refresh
+          </button>
         </div>
       </header>
 
-      <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
-        {screen === 'home' && (
-          <div>
-            {/* Hero */}
-            <div style={{ textAlign: 'center', marginBottom: 48 }}>
-              <div style={{
-                display: 'inline-flex', alignItems: 'center', gap: 8,
-                background: 'rgba(0,255,135,0.1)', border: '1px solid rgba(0,255,135,0.2)',
-                borderRadius: 20, padding: '6px 16px', marginBottom: 24,
-                fontSize: 13, color: '#00ff87'
-              }}>
-                <Zap size={14} /> Powered by Claude AI
-              </div>
-              <h1 style={{ fontSize: 48, fontWeight: 900, lineHeight: 1.1, marginBottom: 16 }}>
-                Predict Any<br />
-                <span className="gradient-text">Football Match</span>
-              </h1>
-              <p style={{ color: '#888', fontSize: 18, maxWidth: 500, margin: '0 auto' }}>
-                AI-powered predictions covering scorelines, goal timing, clean sheets and more across {LEAGUES.length} leagues worldwide.
-              </p>
-            </div>
-
-            {/* Stats Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 40 }}>
-              {[
-                { icon: <Trophy size={20} />, label: 'Leagues', value: '18+' },
-                { icon: <TrendingUp size={20} />, label: 'Data Points', value: '12+' },
-                { icon: <Shield size={20} />, label: 'Predictions', value: 'Unlimited' },
-              ].map((stat, i) => (
-                <div key={i} className="card" style={{ textAlign: 'center' }}>
-                  <div style={{ color: '#00ff87', marginBottom: 8 }}>{stat.icon}</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4 }}>{stat.value}</div>
-                  <div style={{ color: '#666', fontSize: 13 }}>{stat.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Form */}
-            <div className="card" style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>🔮 Get a Prediction</h2>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', color: '#888', fontSize: 13, marginBottom: 8, fontWeight: 500 }}>
-                  Select League
-                </label>
-                <select
-                  className="input-field"
-                  value={selectedLeague}
-                  onChange={e => setSelectedLeague(e.target.value)}
-                >
-                  <option value="">Choose a league...</option>
-                  {LEAGUES.map(l => (
-                    <option key={l.id} value={l.id}>{l.country} {l.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-                <div>
-                  <label style={{ display: 'block', color: '#888', fontSize: 13, marginBottom: 8, fontWeight: 500 }}>
-                    🏠 Home Team
-                  </label>
-                  <input
-                    className="input-field"
-                    placeholder="e.g. Arsenal"
-                    value={homeTeam}
-                    onChange={e => setHomeTeam(e.target.value)}
-                  />
-                </div>
-                <div style={{
-                  width: 40, height: 40, borderRadius: '50%',
-                  background: '#1a1a3e', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 800, color: '#00ff87', fontSize: 13,
-                  marginTop: 24,
-                }}>VS</div>
-                <div>
-                  <label style={{ display: 'block', color: '#888', fontSize: 13, marginBottom: 8, fontWeight: 500 }}>
-                    ✈️ Away Team
-                  </label>
-                  <input
-                    className="input-field"
-                    placeholder="e.g. Chelsea"
-                    value={awayTeam}
-                    onChange={e => setAwayTeam(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 24 }}>
-                <label style={{ display: 'block', color: '#888', fontSize: 13, marginBottom: 8, fontWeight: 500 }}>
-                  📋 Additional Context <span style={{ color: '#555' }}>(optional but improves accuracy)</span>
-                </label>
-                <textarea
-                  className="input-field"
-                  placeholder={`Add any context:\n• Recent form (e.g. Arsenal W W D L W)\n• Key injuries\n• Head to head history\n• Playing style\n• Recent news`}
-                  value={context}
-                  onChange={e => setContext(e.target.value)}
-                  rows={5}
-                  style={{ resize: 'vertical' }}
-                />
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                  {PREDICTION_CONTEXTS.map((ctx, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setContext(prev => prev ? `${prev}\n${ctx}: ` : `${ctx}: `)}
-                      style={{
-                        background: 'rgba(0,255,135,0.05)',
-                        border: '1px solid rgba(0,255,135,0.15)',
-                        color: '#888', borderRadius: 6,
-                        padding: '4px 10px', fontSize: 12,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      + {ctx}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {error && (
-                <div style={{
-                  background: 'rgba(255,99,99,0.1)',
-                  border: '1px solid rgba(255,99,99,0.3)',
-                  borderRadius: 8, padding: '12px 16px',
-                  marginBottom: 16, color: '#ff6363', fontSize: 14,
-                }}>
-                  ⚠️ {error}
-                </div>
-              )}
-
-              <button
-                className="btn-primary"
-                onClick={getPrediction}
-                disabled={loading}
-                style={{ width: '100%', padding: '16px', fontSize: 16, opacity: loading ? 0.7 : 1 }}
-              >
-                {loading ? (
-                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                    <div className="loading-spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
-                    Analysing match...
-                  </span>
-                ) : '🔮 Generate Prediction'}
-              </button>
-            </div>
-
-            <div className="card">
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>⚡ How It Works</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-                {[
-                  { step: '01', title: 'Select Match', desc: 'Choose your league and enter both teams' },
-                  { step: '02', title: 'Add Context', desc: 'Add form, injuries, news for better accuracy' },
-                  { step: '03', title: 'Get Prediction', desc: 'AI analyses and returns full breakdown' },
-                ].map((item, i) => (
-                  <div key={i} style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: 'rgba(0,255,135,0.2)', marginBottom: 8 }}>
-                      {item.step}
-                    </div>
-                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>{item.title}</div>
-                    <div style={{ color: '#666', fontSize: 13 }}>{item.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {screen === 'result' && prediction && (
-          <div>
-            <button
-              onClick={resetApp}
-              style={{
-                background: 'transparent', border: 'none', color: '#00ff87',
-                cursor: 'pointer', display: 'flex', alignItems: 'center',
-                gap: 8, marginBottom: 24, fontSize: 14, fontWeight: 600,
-              }}
-            >
-              ← Back to Predictions
-            </button>
-
-            <div className="prediction-card" style={{ marginBottom: 24, textAlign: 'center' }}>
-              <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>{prediction.league}</div>
-              <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 8 }}>{prediction.match}</div>
-              <div style={{ fontSize: 48, fontWeight: 900, marginBottom: 12 }} className="gradient-text">
-                {prediction.prediction?.predicted_score}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <span className="badge badge-green">🏆 {prediction.prediction?.winner}</span>
-                <span className="badge badge-blue">📊 {prediction.prediction?.confidence}% confidence</span>
-                <span className={`badge ${prediction.risk_level === 'Low' ? 'badge-green' : prediction.risk_level === 'High' ? 'badge-red' : 'badge-blue'}`}>
-                  ⚡ {prediction.risk_level} Risk
-                </span>
-              </div>
-            </div>
-
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>📊 Win Probabilities</h3>
-              {[
-                { label: homeTeam, value: prediction.prediction?.home_win_probability, color: '#00ff87' },
-                { label: 'Draw', value: prediction.prediction?.draw_probability, color: '#60efff' },
-                { label: awayTeam, value: prediction.prediction?.away_win_probability, color: '#ff6363' },
-              ].map((item, i) => (
-                <div key={i} style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>{item.label}</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: item.color }}>{item.value}%</span>
-                  </div>
-                  <div className="stat-bar">
-                    <div className="stat-bar-fill" style={{ width: `${item.value}%`, background: item.color }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>⚽ Goals Analysis</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-                {[
-                  { label: 'Expected Goals', value: prediction.goals?.total_goals_expected },
-                  { label: 'Both Teams Score', value: prediction.goals?.both_teams_to_score },
-                  { label: 'Over 2.5 Goals', value: prediction.goals?.over_2_5 },
-                  { label: 'Best Scoring Half', value: prediction.goals?.most_likely_scoring_half },
-                  { label: 'First Half Goals', value: prediction.goals?.first_half_goals },
-                  { label: 'Second Half Goals', value: prediction.goals?.second_half_goals },
-                ].map((item, i) => (
-                  <div key={i} style={{
-                    background: '#0a0a1f', borderRadius: 10,
-                    padding: '14px 16px', border: '1px solid #1a1a3e'
-                  }}>
-                    <div style={{ color: '#666', fontSize: 12, marginBottom: 6 }}>{item.label}</div>
-                    <div style={{ fontWeight: 700, fontSize: 16, color: '#00ff87' }}>{item.value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 20 }}>🧤 Clean Sheet Probability</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                {[
-                  { label: `${homeTeam} Clean Sheet`, value: prediction.clean_sheets?.home_clean_sheet_probability },
-                  { label: `${awayTeam} Clean Sheet`, value: prediction.clean_sheets?.away_clean_sheet_probability },
-                ].map((item, i) => (
-                  <div key={i} style={{ textAlign: 'center' }}>
-                    <div style={{ color: '#888', fontSize: 13, marginBottom: 8 }}>{item.label}</div>
-                    <div style={{ fontSize: 36, fontWeight: 900, color: '#60efff' }}>{item.value}%</div>
-                    <div className="stat-bar" style={{ marginTop: 8 }}>
-                      <div className="stat-bar-fill" style={{ width: `${item.value}%`, background: '#60efff' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🧠 Key Insights</h3>
-              {prediction.key_insights?.map((insight, i) => (
-                <div key={i} style={{
-                  display: 'flex', gap: 12, marginBottom: 12,
-                  padding: '12px 16px', background: '#0a0a1f',
-                  borderRadius: 8, border: '1px solid #1a1a3e',
-                }}>
-                  <span style={{ color: '#00ff87', fontWeight: 700, minWidth: 20 }}>
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <span style={{ color: '#ccc', fontSize: 14, lineHeight: 1.5 }}>{insight}</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="card" style={{ marginBottom: 24 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>💰 Best Bets</h3>
-              <div style={{ display: 'grid', gap: 10 }}>
-                {prediction.best_bets?.map((bet, i) => (
-                  <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '14px 16px',
-                    background: 'rgba(0,255,135,0.05)',
-                    border: '1px solid rgba(0,255,135,0.15)',
-                    borderRadius: 10,
-                  }}>
-                    <span style={{ fontSize: 18 }}>🎯</span>
-                    <span style={{ color: '#ccc', fontSize: 14 }}>{bet}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{
-                marginTop: 16, padding: '12px 16px',
-                background: 'rgba(255,99,99,0.05)',
-                border: '1px solid rgba(255,99,99,0.15)',
-                borderRadius: 8, color: '#ff6363', fontSize: 12,
-              }}>
-                ⚠️ AI-generated suggestions for informational purposes only. Please gamble responsibly.
-              </div>
-            </div>
-
-            <button className="btn-primary" onClick={resetApp} style={{ width: '100%', padding: 16, fontSize: 16 }}>
-              🔮 Make Another Prediction
-            </button>
-          </div>
-        )}
-      </main>
-
-      <footer style={{
-        borderTop: '1px solid #1a1a3e', padding: '24px',
-        textAlign: 'center', color: '#444', fontSize: 13, marginTop: 48,
+      {/* Quick Questions */}
+      <div style={{
+        borderBottom: '1px solid #1a1a3e',
+        padding: '12px 24px',
+        display: 'flex', gap: 8, overflowX: 'auto',
+        background: '#0d0d18',
       }}>
-        FootballIQ • Powered by Claude AI • {LEAGUES.length} Leagues Covered
-      </footer>
+        {QUICK_QUESTIONS.map((q, i) => (
+          <button
+            key={i}
+            onClick={() => sendMessage(q)}
+            disabled={loading}
+            style={{
+              background: 'rgba(0,255,135,0.05)',
+              border: '1px solid rgba(0,255,135,0.15)',
+              color: '#888', borderRadius: 20,
+              padding: '6px 14px', fontSize: 12,
+              cursor: 'pointer', whiteSpace: 'nowrap',
+              transition: 'all 0.2s', flexShrink: 0,
+            }}
+            onMouseOver={e => {
+              e.target.style.color = '#00ff87'
+              e.target.style.borderColor = 'rgba(0,255,135,0.4)'
+            }}
+            onMouseOut={e => {
+              e.target.style.color = '#888'
+              e.target.style.borderColor = 'rgba(0,255,135,0.15)'
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      {/* Messages */}
+      <div style={{
+        flex: 1, overflowY: 'auto',
+        padding: '24px',
+        display: 'flex', flexDirection: 'column', gap: 16,
+        maxWidth: 900, width: '100%', margin: '0 auto',
+      }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{
+            display: 'flex',
+            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+          }}>
+            {msg.role === 'assistant' && (
+              <div style={{
+                width: 32, height: 32, borderRadius: '10px',
+                background: 'linear-gradient(135deg, #00ff87, #60efff)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                marginRight: 10, flexShrink: 0, marginTop: 4,
+              }}>
+                <Trophy size={16} color="#0a0a0f" />
+              </div>
+            )}
+            <div style={{
+              maxWidth: '80%',
+              background: msg.role === 'user'
+                ? 'linear-gradient(135deg, #00ff87, #60efff)'
+                : '#16213e',
+              color: msg.role === 'user' ? '#0a0a0f' : '#fff',
+              borderRadius: msg.role === 'user'
+                ? '18px 18px 4px 18px'
+                : '18px 18px 18px 4px',
+              padding: '14px 18px',
+              fontSize: 14,
+              lineHeight: 1.6,
+              border: msg.role === 'assistant' ? '1px solid #1a1a3e' : 'none',
+            }}
+              dangerouslySetInnerHTML={{ __html: formatMessage(msg.content) }}
+            />
+          </div>
+        ))}
+
+        {loading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: '10px',
+              background: 'linear-gradient(135deg, #00ff87, #60efff)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Trophy size={16} color="#0a0a0f" />
+            </div>
+            <div style={{
+              background: '#16213e', border: '1px solid #1a1a3e',
+              borderRadius: '18px 18px 18px 4px',
+              padding: '14px 18px', display: 'flex', gap: 6, alignItems: 'center'
+            }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: '#00ff87',
+                  animation: `bounce 1s ease infinite ${i * 0.2}s`,
+                }} />
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div style={{
+        borderTop: '1px solid #1a1a3e',
+        padding: '16px 24px',
+        background: 'rgba(10,10,15,0.95)',
+        backdropFilter: 'blur(10px)',
+      }}>
+        <div style={{
+          maxWidth: 900, margin: '0 auto',
+          display: 'flex', gap: 12, alignItems: 'flex-end',
+        }}>
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                sendMessage()
+              }
+            }}
+            placeholder="Ask anything... e.g. 'What are the best bets this weekend?' or 'Analyze Arsenal vs Chelsea'"
+            className="input-field"
+            rows={2}
+            style={{ flex: 1, resize: 'none', borderRadius: 12 }}
+          />
+          <button
+            onClick={() => sendMessage()}
+            disabled={loading || !input.trim()}
+            className="btn-primary"
+            style={{
+              padding: '12px 20px', borderRadius: 12,
+              opacity: loading || !input.trim() ? 0.5 : 1,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}
+          >
+            <Send size={18} />
+          </button>
+        </div>
+        <div style={{ textAlign: 'center', color: '#333', fontSize: 11, marginTop: 8 }}>
+          FootballIQ • Powered by Claude AI • Please gamble responsibly
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); }
+          30% { transform: translateY(-8px); }
+        }
+      `}</style>
     </div>
   )
 }
