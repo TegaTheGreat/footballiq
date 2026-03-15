@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Trophy, Send, RefreshCw } from 'lucide-react'
+import { Trophy, Send, RefreshCw, TrendingUp } from 'lucide-react'
 
 const QUICK_QUESTIONS = [
   "Best 5 bets this weekend across all leagues?",
@@ -10,17 +10,20 @@ const QUICK_QUESTIONS = [
   "Which teams are most likely to score first?",
   "Best both teams to score picks this weekend?",
   "Which underdogs could cause upsets this weekend?",
+  "Show me my prediction history and win rate",
+  "What markets am I winning most on?",
 ]
 
 export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
     content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
-I fetch live fixtures, standings and recent results directly from football databases every time you ask a question.<br/><br/>
+I fetch live fixtures and standings every time you ask, and I track every prediction I make so I get smarter over time.<br/><br/>
 <strong>Ask me anything or click a quick question below! 👇</strong>`
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [seasonStats, setSeasonStats] = useState(null)
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
@@ -53,6 +56,11 @@ I fetch live fixtures, standings and recent results directly from football datab
       }
 
       const data = await response.json()
+
+      // Update season stats if returned
+      if (data.seasonStats) {
+        setSeasonStats(data.seasonStats)
+      }
 
       if (data.content && data.content[0]) {
         const rawText = data.content[0].text
@@ -121,15 +129,30 @@ I fetch live fixtures, standings and recent results directly from football datab
             </div>
           </div>
         </div>
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="badge badge-green">
-            ✅ Live Data Connected
-          </span>
+          {/* Season Stats */}
+          {seasonStats && seasonStats.total > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: '#f0f7ff', border: '1px solid #bfdbfe',
+              borderRadius: 10, padding: '6px 12px',
+            }}>
+              <TrendingUp size={14} color="#1d4ed8" />
+              <span style={{ fontSize: 12, color: '#1d4ed8', fontWeight: 600 }}>
+                {seasonStats.winRate}% Win Rate
+              </span>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                {seasonStats.won}W {seasonStats.lost}L {seasonStats.pending}P
+              </span>
+            </div>
+          )}
+          <span className="badge badge-green">✅ Live Data</span>
           <button
             onClick={() => {
               setMessages([{
                 role: 'assistant',
-                content: `👋 Welcome back! Ask me anything about this weekend's matches. I'll fetch the latest data fresh for you! 👇`
+                content: `👋 New chat started! Ask me anything about upcoming matches. 👇`
               }])
             }}
             style={{
@@ -295,7 +318,7 @@ I fetch live fixtures, standings and recent results directly from football datab
                 sendMessage()
               }
             }}
-            placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Which teams score most in the first half?'"
+            placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Show me my win rate'"
             className="input-field"
             rows={2}
             style={{
@@ -322,7 +345,7 @@ I fetch live fixtures, standings and recent results directly from football datab
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Live data via API-Sports & RapidAPI • Please gamble responsibly 🎗️
+          FootballIQ • Live data via API-Sports • Predictions tracked automatically • Please gamble responsibly 🎗️
         </div>
       </div>
 
