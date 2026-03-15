@@ -15,7 +15,9 @@ const QUICK_QUESTIONS = [
 export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
-    content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>I have direct access to live fixtures, standings and recent results across all major leagues.<br/><br/><strong>Ask me anything or click a quick question below! 👇</strong>`
+    content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
+I fetch live fixtures, standings and recent results directly from football databases every time you ask a question.<br/><br/>
+<strong>Ask me anything or click a quick question below! 👇</strong>`
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -46,7 +48,8 @@ export default function App() {
       })
 
       if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`)
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || `Server error: ${response.status}`)
       }
 
       const data = await response.json()
@@ -65,7 +68,7 @@ export default function App() {
           content: formatted
         }])
       } else {
-        throw new Error(data.error?.message || 'No response from AI')
+        throw new Error(data.error?.message || 'No response received')
       }
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -107,7 +110,10 @@ export default function App() {
             <Trophy size={20} color="#ffffff" />
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: '-0.5px', color: '#1a1a2e' }}>
+            <div style={{
+              fontWeight: 800, fontSize: 18,
+              letterSpacing: '-0.5px', color: '#1a1a2e'
+            }}>
               Football<span className="gradient-text">IQ</span>
             </div>
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: -2 }}>
@@ -119,6 +125,24 @@ export default function App() {
           <span className="badge badge-green">
             ✅ Live Data Connected
           </span>
+          <button
+            onClick={() => {
+              setMessages([{
+                role: 'assistant',
+                content: `👋 Welcome back! Ask me anything about this weekend's matches. I'll fetch the latest data fresh for you! 👇`
+              }])
+            }}
+            style={{
+              background: '#f8faff',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8, padding: '6px 12px',
+              cursor: 'pointer', color: '#64748b',
+              display: 'flex', alignItems: 'center',
+              gap: 6, fontSize: 12, fontWeight: 500,
+            }}
+          >
+            <RefreshCw size={12} /> New Chat
+          </button>
         </div>
       </header>
 
@@ -141,14 +165,17 @@ export default function App() {
               borderRadius: 20,
               padding: '6px 14px',
               fontSize: 12, fontWeight: 500,
-              cursor: 'pointer',
+              cursor: loading ? 'not-allowed' : 'pointer',
               whiteSpace: 'nowrap',
               flexShrink: 0,
               transition: 'all 0.2s',
+              opacity: loading ? 0.6 : 1,
             }}
             onMouseOver={e => {
-              e.target.style.background = '#dbeafe'
-              e.target.style.borderColor = '#3b82f6'
+              if (!loading) {
+                e.target.style.background = '#dbeafe'
+                e.target.style.borderColor = '#3b82f6'
+              }
             }}
             onMouseOut={e => {
               e.target.style.background = '#f0f7ff'
@@ -239,7 +266,7 @@ export default function App() {
                 }} />
               ))}
               <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 13 }}>
-                Fetching live data and analysing matches...
+                Fetching live data and analysing...
               </span>
             </div>
           </div>
@@ -295,7 +322,7 @@ export default function App() {
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Live data via API-Sports • Please gamble responsibly 🎗️
+          FootballIQ • Live data via API-Sports & RapidAPI • Please gamble responsibly 🎗️
         </div>
       </div>
 
