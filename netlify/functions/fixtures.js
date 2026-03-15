@@ -11,11 +11,26 @@ export default async (req) => {
 
   try {
     const APISPORTS_KEY = process.env.APISPORTS_KEY
-    const headers = {
-      'x-apisports-key': APISPORTS_KEY,
+    const headers = { 'x-apisports-key': APISPORTS_KEY }
+
+    // Smart season detection — football seasons vary by league
+    const now = new Date()
+    const month = now.getMonth() + 1 // 1-12
+    const year = now.getFullYear()
+
+    // Most European leagues run Aug-May, so after June use current year
+    // South American leagues run Feb-Dec, so use current year always
+    const getSeasonForLeague = (leagueId) => {
+      const southAmericanLeagues = [71, 128, 262] // Brazil, Argentina, Mexico
+      const summerLeagues = [307] // Saudi runs Feb-Nov
+      
+      if (southAmericanLeagues.includes(leagueId) || summerLeagues.includes(leagueId)) {
+        return year
+      }
+      // European leagues — if before July use previous year as season start
+      return month < 7 ? year - 1 : year
     }
 
-    const season = 2024
     const leagueIds = [
       39,   // Premier League
       40,   // Championship
@@ -27,26 +42,31 @@ export default async (req) => {
       88,   // Eredivisie
       144,  // Pro League Belgium
       307,  // Saudi Pro League
+      179,  // Scottish Premiership
+      218,  // Austrian Bundesliga
       2,    // Champions League
       3,    // Europa League
       848,  // Conference League
+      128,  // Argentine Primera
+      71,   // Brazilian Serie A
     ]
 
-    // Get today and next 7 days
-    const today = new Date()
-    const nextWeek = new Date(today)
-    nextWeek.setDate(today.getDate() + 7)
-    const from = today.toISOString().split('T')[0]
+    // Get date range — today to next 7 days
+    const today = now.toISOString().split('T')[0]
+    const nextWeek = new Date(now)
+    nextWeek.setDate(now.getDate() + 7)
     const to = nextWeek.toISOString().split('T')[0]
 
     // Fetch fixtures for all leagues in parallel
-    const requests = leagueIds.map(leagueId =>
-      fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&from=${from}&to=${to}&status=NS`, {
-        headers
-      })
+    const requests = leagueIds.map(leagueId => {
+      const season = getSeasonForLeague(leagueId)
+      return fetch(
+        `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${to}&status=NS`,
+        { headers }
+      )
       .then(r => r.json())
       .catch(() => ({ response: [] }))
-    )
+    })
 
     const results = await Promise.all(requests)
 
@@ -61,8 +81,6 @@ export default async (req) => {
           country: f.league?.country,
           homeTeam: f.teams?.home?.name,
           awayTeam: f.teams?.away?.name,
-          homeLogo: f.teams?.home?.logo,
-          awayLogo: f.teams?.away?.logo,
           venue: f.fixture?.venue?.name,
           status: f.fixture?.status?.long,
         })
