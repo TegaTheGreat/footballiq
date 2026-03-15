@@ -18,7 +18,7 @@ export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
     content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
-I know every fixture across all major leagues this season. You can also upload screenshots of fixture lists, league tables, team news or anything else and I'll read them instantly.<br/><br/>
+I remember everything in our conversation so you can build on previous predictions naturally — just like talking to a real analyst.<br/><br/>
 <strong>Ask me anything or upload an image below! 👇</strong>`
   }])
   const [input, setInput] = useState('')
@@ -37,7 +37,6 @@ I know every fixture across all major leagues this season. You can also upload s
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
     if (!file) return
-
     const reader = new FileReader()
     reader.onload = (event) => {
       const base64 = event.target.result.split(',')[1]
@@ -57,33 +56,46 @@ I know every fixture across all major leagues this season. You can also upload s
 
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
-    if (!text && !imageBase64 || loading) return
+    if ((!text && !imageBase64) || loading) return
 
     setInput('')
     setLoading(true)
 
-    // Build user message display
     const userContent = text || 'Analyze this image and give me predictions'
+
+    // Add user message to UI
     const userMessage = {
       role: 'user',
       content: uploadedImage
         ? `${userContent}<br/><img src="${uploadedImage}" style="max-width:100%;border-radius:8px;margin-top:8px"/>`
         : userContent
     }
-    setMessages(prev => [...prev, userMessage])
 
-    // Clear image after sending
     const sentImage = imageBase64
     const sentImageType = imageType
     removeImage()
 
+    setMessages(prev => [...prev, userMessage])
+
     try {
+      // Build clean conversation history to send
+      const conversationHistory = [...messages, userMessage]
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({
+          role: m.role,
+          // Strip HTML tags for the API
+          content: typeof m.content === 'string'
+            ? m.content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
+            : m.content
+        }))
+        .filter(m => m.content.length > 0)
+
       const response = await fetch('/api/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: userContent,
-          messages: [{ role: 'user', content: userContent }],
+          messages: conversationHistory,
           image: sentImage ? {
             base64: sentImage,
             type: sentImageType,
@@ -191,7 +203,7 @@ I know every fixture across all major leagues this season. You can also upload s
             onClick={() => {
               setMessages([{
                 role: 'assistant',
-                content: `👋 New chat started! Ask me anything or upload an image. 👇`
+                content: `👋 New conversation started! What would you like to analyze? 👇`
               }])
             }}
             style={{
@@ -328,7 +340,7 @@ I know every fixture across all major leagues this season. You can also upload s
                 }} />
               ))}
               <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 13 }}>
-                Analysing...
+                Thinking...
               </span>
             </div>
           </div>
@@ -342,7 +354,6 @@ I know every fixture across all major leagues this season. You can also upload s
           padding: '8px 24px',
           background: '#ffffff',
           borderTop: '1px solid #e2e8f0',
-          maxWidth: 960, width: '100%', margin: '0 auto',
         }}>
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -351,18 +362,15 @@ I know every fixture across all major leagues this season. You can also upload s
           }}>
             <img
               src={uploadedImage}
-              alt="upload preview"
+              alt="upload"
               style={{ height: 40, width: 40, objectFit: 'cover', borderRadius: 6 }}
             />
-            <span style={{ fontSize: 12, color: '#1d4ed8' }}>Image ready to send</span>
-            <button
-              onClick={removeImage}
-              style={{
-                background: 'none', border: 'none',
-                cursor: 'pointer', color: '#94a3b8',
-                display: 'flex', alignItems: 'center',
-              }}
-            >
+            <span style={{ fontSize: 12, color: '#1d4ed8' }}>Image ready</span>
+            <button onClick={removeImage} style={{
+              background: 'none', border: 'none',
+              cursor: 'pointer', color: '#94a3b8',
+              display: 'flex', alignItems: 'center',
+            }}>
               <X size={14} />
             </button>
           </div>
@@ -381,7 +389,6 @@ I know every fixture across all major leagues this season. You can also upload s
           display: 'flex', gap: 12,
           alignItems: 'flex-end',
         }}>
-          {/* Image Upload Button */}
           <input
             ref={fileInputRef}
             type="file"
@@ -395,13 +402,11 @@ I know every fixture across all major leagues this season. You can also upload s
             style={{
               background: uploadedImage ? '#dbeafe' : '#f8faff',
               border: `1px solid ${uploadedImage ? '#3b82f6' : '#e2e8f0'}`,
-              borderRadius: 12,
-              padding: '12px',
+              borderRadius: 12, padding: '12px',
               cursor: 'pointer',
               color: uploadedImage ? '#1d4ed8' : '#94a3b8',
               display: 'flex', alignItems: 'center',
-              flexShrink: 0,
-              transition: 'all 0.2s',
+              flexShrink: 0, transition: 'all 0.2s',
             }}
             title="Upload image"
           >
@@ -418,8 +423,8 @@ I know every fixture across all major leagues this season. You can also upload s
               }
             }}
             placeholder={uploadedImage
-              ? "Add a question about this image or just hit send..."
-              : "Ask anything or upload an image of fixtures, tables, team news..."
+              ? "Add context or just hit send..."
+              : "Ask anything... build on previous answers naturally"
             }
             className="input-field"
             rows={2}
@@ -447,7 +452,7 @@ I know every fixture across all major leagues this season. You can also upload s
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Upload images of fixtures or tables • Predictions tracked automatically • Please gamble responsibly 🎗️
+          FootballIQ • Full conversation memory • Upload images • Predictions tracked • Please gamble responsibly 🎗️
         </div>
       </div>
 
