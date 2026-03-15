@@ -12,16 +12,13 @@ export default async (req) => {
   try {
     const body = await req.json()
 
-    // Keep messages short to avoid timeout
-    const messages = body.messages.map(m => ({
+    // Only keep last 2 messages but allow more content
+    const messages = body.messages.slice(-2).map(m => ({
       role: m.role,
       content: typeof m.content === 'string'
-        ? m.content.slice(0, 4000)
+        ? m.content.slice(0, 12000)
         : m.content
     }))
-
-    // Only keep last 3 messages to reduce payload
-    const recentMessages = messages.slice(-3)
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -32,9 +29,9 @@ export default async (req) => {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
+        max_tokens: 3000,
         system: body.system,
-        messages: recentMessages,
+        messages,
       }),
     })
 
