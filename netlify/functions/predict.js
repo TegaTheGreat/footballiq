@@ -11,14 +11,29 @@ export default async (req) => {
 
   try {
     const body = await req.json()
+    const { messages, system, context } = body
 
-    // Only keep last 2 messages but allow more content
-    const messages = body.messages.slice(-2).map(m => ({
-      role: m.role,
-      content: typeof m.content === 'string'
-        ? m.content.slice(0, 12000)
-        : m.content
-    }))
+    // Build a rich system prompt that includes all live data
+    const fullSystem = `${system}
+
+${context ? `
+=== LIVE FOOTBALL DATA (Use this for all predictions) ===
+${context}
+=== END OF LIVE DATA ===
+
+CRITICAL INSTRUCTION: You have been provided with real live football data above. Always use this data when making predictions. Never say you don't have data. The data includes fixtures, standings, form, goals scored, goals conceded, home and away records, and injury news. Base every prediction on this real data.
+` : ''}
+`
+
+    // Clean messages — only keep last 4 exchanges
+    const cleanMessages = (messages || [])
+      .slice(-4)
+      .map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string'
+          ? m.content.replace(/<[^>]*>/g, '').slice(0, 2000)
+          : m.content
+      }))
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -30,8 +45,8 @@ export default async (req) => {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 3000,
-        system: body.system,
-        messages,
+        system: fullSystem,
+        messages: cleanMessages,
       }),
     })
 
