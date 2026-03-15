@@ -12,7 +12,19 @@ export default async (req) => {
   try {
     const APISPORTS_KEY = process.env.APISPORTS_KEY
     const headers = { 'x-apisports-key': APISPORTS_KEY }
-    const season = 2024
+
+    const now = new Date()
+    const month = now.getMonth() + 1
+    const year = now.getFullYear()
+
+    const getSeasonForLeague = (leagueId) => {
+      const southAmericanLeagues = [71, 128, 262]
+      const summerLeagues = [307]
+      if (southAmericanLeagues.includes(leagueId) || summerLeagues.includes(leagueId)) {
+        return year
+      }
+      return month < 7 ? year - 1 : year
+    }
 
     const leagueIds = [
       39,   // Premier League
@@ -25,31 +37,39 @@ export default async (req) => {
       88,   // Eredivisie
       144,  // Pro League Belgium
       307,  // Saudi Pro League
+      179,  // Scottish Premiership
+      218,  // Austrian Bundesliga
+      128,  // Argentine Primera
+      71,   // Brazilian Serie A
     ]
 
     // Fetch standings and recent results in parallel
     const [standingsResults, recentMatchResults] = await Promise.all([
 
-      // Standings
-      Promise.all(leagueIds.map(leagueId =>
-        fetch(`https://v3.football.api-sports.io/standings?league=${leagueId}&season=${season}`, {
-          headers
-        })
+      // Standings for all leagues
+      Promise.all(leagueIds.map(leagueId => {
+        const season = getSeasonForLeague(leagueId)
+        return fetch(
+          `https://v3.football.api-sports.io/standings?league=${leagueId}&season=${season}`,
+          { headers }
+        )
         .then(r => r.json())
         .catch(() => null)
-      )),
+      })),
 
       // Recent finished matches
-      Promise.all(leagueIds.slice(0, 6).map(leagueId =>
-        fetch(`https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&status=FT&last=10`, {
-          headers
-        })
+      Promise.all(leagueIds.slice(0, 8).map(leagueId => {
+        const season = getSeasonForLeague(leagueId)
+        return fetch(
+          `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&status=FT&last=10`,
+          { headers }
+        )
         .then(r => r.json())
         .catch(() => null)
-      ))
+      }))
     ])
 
-    // Build team profiles
+    // Build team profiles from standings
     const teamProfiles = {}
     standingsResults.forEach(data => {
       if (!data?.response) return
