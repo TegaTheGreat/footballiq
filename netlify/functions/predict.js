@@ -75,7 +75,7 @@ export default async (req) => {
         ).then(r => r.json()).catch(() => null)
       })),
 
-      // Recent results last 7 days
+      // Recent results
       Promise.all([39, 78, 135, 140, 61].map(id => {
         const season = getSeasonForLeague(id)
         return fetch(
@@ -92,13 +92,13 @@ export default async (req) => {
       data.response.forEach(f => {
         allFixtures.push({
           date: new Date(f.fixture?.date).toLocaleDateString('en-GB', {
-            weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+            weekday: 'short', day: 'numeric', month: 'short',
+            hour: '2-digit', minute: '2-digit'
           }),
           home: f.teams?.home?.name,
           away: f.teams?.away?.name,
           league: f.league?.name,
           country: f.league?.country,
-          venue: f.fixture?.venue?.name,
         })
       })
     })
@@ -139,7 +139,9 @@ export default async (req) => {
       if (!data?.response) return
       data.response.forEach(f => {
         allRecent.push({
-          date: new Date(f.fixture?.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+          date: new Date(f.fixture?.date).toLocaleDateString('en-GB', {
+            day: 'numeric', month: 'short'
+          }),
           home: f.teams?.home?.name,
           away: f.teams?.away?.name,
           score: `${f.goals?.home}-${f.goals?.away}`,
@@ -149,24 +151,24 @@ export default async (req) => {
       })
     })
 
-    // Build rich context string
+    // Build context string
     let context = `TODAY: ${today}\n\n`
 
     if (allFixtures.length > 0) {
-      context += `UPCOMING FIXTURES (${allFixtures.length} matches):\n`
+      context += `UPCOMING FIXTURES (${allFixtures.length} matches found):\n`
       allFixtures.forEach(f => {
         const homeS = teamStats[f.home]
         const awayS = teamStats[f.away]
         context += `\n${f.date} | ${f.home} vs ${f.away} | ${f.league}\n`
         if (homeS) {
-          context += `  ${f.home}: P${homeS.position} ${homeS.points}pts | W${homeS.won} D${homeS.drawn} L${homeS.lost} | GF${homeS.goalsFor} GA${homeS.goalsAgainst} | Form:${homeS.form} | HomeW:${homeS.homeWon}/${homeS.homePlayed} HomeGF:${homeS.homeGF} HomeGA:${homeS.homeGA}\n`
+          context += `  ${f.home}: Pos${homeS.position} ${homeS.points}pts W${homeS.won} D${homeS.drawn} L${homeS.lost} GF${homeS.goalsFor} GA${homeS.goalsAgainst} Form:${homeS.form} HomeW:${homeS.homeWon}/${homeS.homePlayed} HomeGF:${homeS.homeGF} HomeGA:${homeS.homeGA}\n`
         }
         if (awayS) {
-          context += `  ${f.away}: P${awayS.position} ${awayS.points}pts | W${awayS.won} D${awayS.drawn} L${awayS.lost} | GF${awayS.goalsFor} GA${awayS.goalsAgainst} | Form:${awayS.form} | AwayW:${awayS.awayWon}/${awayS.awayPlayed} AwayGF:${awayS.awayGF} AwayGA:${awayS.awayGA}\n`
+          context += `  ${f.away}: Pos${awayS.position} ${awayS.points}pts W${awayS.won} D${awayS.drawn} L${awayS.lost} GF${awayS.goalsFor} GA${awayS.goalsAgainst} Form:${awayS.form} AwayW:${awayS.awayWon}/${awayS.awayPlayed} AwayGF:${awayS.awayGF} AwayGA:${awayS.awayGA}\n`
         }
       })
     } else {
-      context += 'No upcoming fixtures found in database for next 7 days.\n'
+      context += 'No upcoming fixtures found for next 7 days.\n'
     }
 
     if (allRecent.length > 0) {
@@ -176,22 +178,20 @@ export default async (req) => {
       })
     }
 
-    // Build final system prompt with injected data
+    // Final system prompt with injected live data
     const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor.
 
-You have been given REAL LIVE football data fetched directly from the API-Sports database RIGHT NOW. This data is accurate and current. Use it to make your predictions.
+You have been given REAL LIVE football data fetched directly from API-Sports RIGHT NOW. Use it for all predictions.
 
-LIVE DATA:
 ${context}
 
-INSTRUCTIONS:
-- Base ALL predictions strictly on the data above
-- Never say you don't have data — you have it above
-- When giving multiple predictions use HTML tables
+RULES:
+- Base ALL predictions on the data above
+- Never say you have no data
+- Use HTML tables for multiple predictions
 - Table format: <table><thead><tr><th>Match</th><th>League</th><th>Pick</th><th>Market</th><th>Confidence</th><th>Risk</th></tr></thead><tbody>...</tbody></table>
 - Be decisive and confident
-- Consider form, goals scored/conceded, home/away records
-- End with responsible gambling reminder`
+- Always end with responsible gambling reminder`
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -201,10 +201,10 @@ INSTRUCTIONS:
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 3000,
         system: systemPrompt,
-        messages: (messages || [{ role: 'user', content: question || 'Give me the best bets this weekend' }])
+        messages: (messages || [{ role: 'user', content: question }])
           .slice(-2)
           .map(m => ({
             role: m.role,
@@ -219,7 +219,10 @@ INSTRUCTIONS:
       const errText = await response.text()
       return new Response(JSON.stringify({ error: errText }), {
         status: response.status,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
       })
     }
 
@@ -235,7 +238,10 @@ INSTRUCTIONS:
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     })
   }
 }
