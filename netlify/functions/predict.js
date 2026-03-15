@@ -12,12 +12,16 @@ export default async (req) => {
   try {
     const body = await req.json()
 
+    // Keep messages short to avoid timeout
     const messages = body.messages.map(m => ({
       role: m.role,
       content: typeof m.content === 'string'
-        ? m.content.slice(0, 6000)
+        ? m.content.slice(0, 4000)
         : m.content
     }))
+
+    // Only keep last 3 messages to reduce payload
+    const recentMessages = messages.slice(-3)
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -27,10 +31,10 @@ export default async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
         system: body.system,
-        messages,
+        messages: recentMessages,
       }),
     })
 
@@ -66,6 +70,5 @@ export default async (req) => {
 }
 
 export const config = {
-  path: '/api/predict',
-  type: 'experimental-background'
+  path: '/api/predict'
 }
