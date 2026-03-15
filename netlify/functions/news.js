@@ -10,55 +10,48 @@ export default async (req) => {
   }
 
   try {
-    const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY
+    const APISPORTS_KEY = process.env.APISPORTS_KEY
+    const headers = { 'x-apisports-key': APISPORTS_KEY }
+    const season = 2024
 
-    // Fetch football news from multiple sources in parallel
-    const [sportsNews, transferNews] = await Promise.all([
+    // Fetch injuries and sidelined players for top leagues
+    const leagueIds = [39, 78, 135, 140, 61]
 
-      // General football news
-      fetch('https://sport-news-live.p.rapidapi.com/news/football', {
-        headers: {
-          'x-rapidapi-key': RAPIDAPI_KEY,
-          'x-rapidapi-host': 'sport-news-live.p.rapidapi.com',
-        }
-      }).then(r => r.json()).catch(() => ({ articles: [] })),
+    const injuryRequests = leagueIds.map(leagueId =>
+      fetch(`https://v3.football.api-sports.io/injuries?league=${leagueId}&season=${season}`, {
+        headers
+      })
+      .then(r => r.json())
+      .catch(() => ({ response: [] }))
+    )
 
-      // Transfer and injury news
-      fetch('https://sport-news-live.p.rapidapi.com/news/football/transfers', {
-        headers: {
-          'x-rapidapi-key': RAPIDAPI_KEY,
-          'x-rapidapi-host': 'sport-news-live.p.rapidapi.com',
-        }
-      }).then(r => r.json()).catch(() => ({ articles: [] })),
-    ])
+    const injuryResults = await Promise.all(injuryRequests)
 
-    // Combine and format news
-    const allNews = []
-
-    const processArticles = (data, category) => {
-      const articles = data?.articles || data?.data || data?.results || []
-      if (Array.isArray(articles)) {
-        articles.slice(0, 20).forEach(article => {
-          allNews.push({
-            title: article.title || article.headline || '',
-            summary: article.description || article.summary || article.excerpt || '',
-            source: article.source?.name || article.source || category,
-            publishedAt: article.publishedAt || article.date || '',
-            category,
+    // Format injury news
+    const news = []
+    injuryResults.forEach(data => {
+      if (!data?.response) return
+      data.response.slice(0, 10).forEach(injury => {
+        const player = injury.player?.name
+        const team = injury.team?.name
+        const type = injury.player?.type
+        const reason = injury.player?.reason
+        if (player && team) {
+          news.push({
+            title: `${player} (${team}) — ${type || 'Injury'}`,
+            summary: reason || 'Out of upcoming fixtures',
+            source: 'API-Sports Injuries',
+            category: 'Injuries & Suspensions',
+            publishedAt: new Date().toISOString(),
           })
-        })
-      }
-    }
+        }
+      })
+    })
 
-    processArticles(sportsNews, 'Football News')
-    processArticles(transferNews, 'Transfers & Injuries')
-
-    // Sort by date
-    allNews.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
-
+    // Also fetch head to head context for top fixtures
     return new Response(JSON.stringify({
-      news: allNews.slice(0, 30),
-      total: allNews.length,
+      news: news.slice(0, 30),
+      total: news.length,
     }), {
       headers: {
         'Content-Type': 'application/json',
@@ -67,7 +60,11 @@ export default async (req) => {
     })
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message, news: [] }), {
+    return new Response(JSON.stringify({
+      error: err.message,
+      news: [],
+      total: 0,
+    }), {
       status: 500,
       headers: {
         'Content-Type': 'application/json',
