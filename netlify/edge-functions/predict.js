@@ -358,5 +358,6 @@ PREDICTIONS_JSON-->
 }
 
 export const config = {
-  path: '/api/predict'
+  path: '/api/predict',
+  cache: 'manual',
 }
