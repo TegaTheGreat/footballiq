@@ -12,203 +12,18 @@ const QUICK_QUESTIONS = [
   "Which underdogs could cause upsets this weekend?",
 ]
 
-const SYSTEM_PROMPT = `You are FootballIQ, an elite football analyst with access to real live data.
-
-CRITICAL: Live football data will be provided to you in every request. This data includes:
-- Upcoming fixtures with dates, teams and competitions
-- League standings with position, points, goals for, goals against, form
-- Recent match results with half time and full time scores
-- Injury and suspension news
-
-You MUST use this live data for all predictions. NEVER say you don't have data. NEVER ask for data. Just analyze what is provided and give confident predictions.
-
-When making predictions always consider:
-- League position and points gap
-- Recent form sequence (W/D/L)
-- Goals scored and conceded at home vs away
-- Half time scoring patterns
-- Home advantage statistics
-- Injury news impact
-
-Output format rules:
-- Always use HTML tables for multiple predictions
-- Use this table format:
-<table>
-<thead><tr><th>Match</th><th>League</th><th>Pick</th><th>Market</th><th>Confidence</th><th>Risk</th></tr></thead>
-<tbody>
-<tr><td>Arsenal vs Chelsea</td><td>Premier League</td><td>Arsenal Win</td><td>Match Result</td><td>74%</td><td>Low</td></tr>
-</tbody>
-</table>
-- Use <strong> for key stats and insights
-- Be decisive — give clear recommendations
-- Always end with a brief responsible gambling reminder`
-
 export default function App() {
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState([{
+    role: 'assistant',
+    content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>I have direct access to live fixtures, standings and recent results across all major leagues.<br/><br/><strong>Ask me anything or click a quick question below! 👇</strong>`
+  }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [fixtures, setFixtures] = useState([])
-  const [teamProfiles, setTeamProfiles] = useState({})
-  const [recentResults, setRecentResults] = useState([])
-  const [news, setNews] = useState([])
-  const [dataStatus, setDataStatus] = useState('loading')
   const messagesEndRef = useRef(null)
-
-  useEffect(() => {
-    loadAllData()
-  }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  const loadAllData = async () => {
-    setDataStatus('loading')
-    setMessages([{
-      role: 'assistant',
-      content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>⏳ Loading live fixtures, standings and injury news across all major leagues...`
-    }])
-
-    try {
-      const [fixturesRes, standingsRes, newsRes] = await Promise.all([
-        fetch('/api/fixtures'),
-        fetch('/api/standings'),
-        fetch('/api/news'),
-      ])
-
-      const fixturesData = await fixturesRes.json()
-      const standingsData = await standingsRes.json()
-      const newsData = await newsRes.json()
-
-      const matches = fixturesData.matches || []
-      const profiles = standingsData.teamProfiles || {}
-      const results = standingsData.recentResults || []
-      const articles = newsData.news || []
-
-      setFixtures(matches)
-      setTeamProfiles(profiles)
-      setRecentResults(results)
-      setNews(articles)
-      setDataStatus(matches.length > 0 ? 'ready' : 'limited')
-
-      const teamsCount = Object.keys(profiles).length
-
-      const upcomingPreview = matches.slice(0, 6).map(m => {
-        const date = new Date(m.date).toLocaleDateString('en-GB', {
-          weekday: 'short', day: 'numeric', month: 'short',
-        })
-        const homeP = profiles[m.homeTeam]
-        const awayP = profiles[m.awayTeam]
-        const homeInfo = homeP ? ` (${homeP.position}th, Form: ${homeP.form})` : ''
-        const awayInfo = awayP ? ` (${awayP.position}th, Form: ${awayP.form})` : ''
-        return `• <strong>${m.homeTeam}</strong>${homeInfo} vs <strong>${m.awayTeam}</strong>${awayInfo} — ${date} [${m.competition}]`
-      }).join('<br/>')
-
-      setMessages([{
-        role: 'assistant',
-        content: `✅ <strong>FootballIQ is ready!</strong><br/><br/>
-📅 <strong>${matches.length} upcoming fixtures</strong> loaded<br/>
-📊 <strong>${teamsCount} team profiles</strong> with live standings and form<br/>
-⚽ <strong>${results.length} recent results</strong> for pattern analysis<br/>
-📰 <strong>${articles.length} injury updates</strong> loaded<br/><br/>
-<strong>Upcoming fixtures preview:</strong><br/>
-${upcomingPreview}
-${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures loaded</em>` : ''}<br/><br/>
-<strong>Ask me anything or click a quick question below! 👇</strong>`
-      }])
-
-    } catch (err) {
-      setDataStatus('limited')
-      setMessages([{
-        role: 'assistant',
-        content: `⚠️ <strong>Running in knowledge mode</strong> — I can still analyze matches using my football knowledge. Ask me about any teams or fixtures!`
-      }])
-    }
-  }
-
-  const buildContext = (userMessage) => {
-    let context = ''
-    const message = userMessage.toLowerCase()
-
-    // Smart filtering — send relevant fixtures based on question
-    let relevantFixtures = fixtures
-    if (message.includes('premier league') || message.includes('england')) {
-      relevantFixtures = fixtures.filter(f =>
-        f.competition?.includes('Premier') ||
-        f.competition?.includes('Championship')
-      )
-    } else if (message.includes('bundesliga') || message.includes('germany')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('Bundesliga'))
-    } else if (message.includes('la liga') || message.includes('spain')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('La Liga'))
-    } else if (message.includes('serie a') || message.includes('italy')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('Serie A'))
-    } else if (message.includes('ligue 1') || message.includes('france')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('Ligue 1'))
-    } else if (message.includes('eredivisie') || message.includes('netherlands')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('Eredivisie'))
-    } else if (message.includes('scottish') || message.includes('scotland')) {
-      relevantFixtures = fixtures.filter(f => f.competition?.includes('Scottish'))
-    }
-
-    // Upcoming fixtures with team stats
-    if (relevantFixtures.length > 0) {
-      context += 'UPCOMING FIXTURES:\n'
-      context += relevantFixtures.slice(0, 25).map(m => {
-        const date = new Date(m.date).toLocaleDateString('en-GB', {
-          weekday: 'short', day: 'numeric', month: 'short',
-          hour: '2-digit', minute: '2-digit'
-        })
-        const homeP = teamProfiles[m.homeTeam]
-        const awayP = teamProfiles[m.awayTeam]
-        let line = `${date} | ${m.homeTeam} vs ${m.awayTeam} | ${m.competition}`
-        if (homeP) {
-          line += `\n  HOME ${m.homeTeam}: Pos${homeP.position} Pts${homeP.points} W${homeP.won} D${homeP.drawn} L${homeP.lost} GF${homeP.goalsFor} GA${homeP.goalsAgainst} Form:${homeP.form} HomeGF:${homeP.homeGoalsFor} HomeGA:${homeP.homeGoalsAgainst}`
-        }
-        if (awayP) {
-          line += `\n  AWAY ${m.awayTeam}: Pos${awayP.position} Pts${awayP.points} W${awayP.won} D${awayP.drawn} L${awayP.lost} GF${awayP.goalsFor} GA${awayP.goalsAgainst} Form:${awayP.form} AwayGF:${awayP.awayGoalsFor} AwayGA:${awayP.awayGoalsAgainst}`
-        }
-        return line
-      }).join('\n\n')
-    }
-
-    // Recent results with halftime scores
-    if (recentResults.length > 0) {
-      context += '\n\nRECENT RESULTS:\n'
-      context += recentResults.slice(0, 30).map(r => {
-        const date = new Date(r.date).toLocaleDateString('en-GB', {
-          day: 'numeric', month: 'short'
-        })
-        return `${date}: ${r.home} ${r.homeScore}-${r.awayScore} ${r.away} (HT:${r.halfTimeHome ?? '?'}-${r.halfTimeAway ?? '?'}) [${r.competition}]`
-      }).join('\n')
-    }
-
-    // Injury news
-    if (news.length > 0) {
-      context += '\n\nINJURY & SUSPENSION NEWS:\n'
-      context += news.slice(0, 20).map(n => n.title).join('\n')
-    }
-
-    // League standings
-    if (Object.keys(teamProfiles).length > 0) {
-      context += '\n\nLEAGUE STANDINGS:\n'
-      const leagueGroups = {}
-      Object.entries(teamProfiles).forEach(([team, data]) => {
-        if (!leagueGroups[data.league]) leagueGroups[data.league] = []
-        leagueGroups[data.league].push({ team, ...data })
-      })
-      Object.entries(leagueGroups).slice(0, 8).forEach(([league, teams]) => {
-        context += `\n${league}:\n`
-        teams.sort((a, b) => a.position - b.position)
-          .slice(0, 10)
-          .forEach(t => {
-            context += `${t.position}. ${t.team} | ${t.points}pts | GF${t.goalsFor} GA${t.goalsAgainst} | Form: ${t.form}\n`
-          })
-      })
-    }
-
-    return context
-  }
 
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
@@ -221,14 +36,11 @@ ${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures load
     setMessages(prev => [...prev, userMessage])
 
     try {
-      const context = buildContext(text)
-
       const response = await fetch('/api/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          system: SYSTEM_PROMPT,
-          context: context,
+          question: text,
           messages: [{ role: 'user', content: text }],
         }),
       })
@@ -304,27 +116,9 @@ ${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures load
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className={`badge ${
-            dataStatus === 'loading' ? 'badge-blue' :
-            dataStatus === 'ready' ? 'badge-green' : 'badge-blue'
-          }`}>
-            {dataStatus === 'loading' ? '⏳ Loading...' :
-             dataStatus === 'ready' ? `✅ ${fixtures.length} fixtures loaded` :
-             'ℹ️ Knowledge mode'}
+          <span className="badge badge-green">
+            ✅ Live Data Connected
           </span>
-          <button
-            onClick={loadAllData}
-            style={{
-              background: '#f8faff',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8, padding: '6px 12px',
-              cursor: 'pointer', color: '#64748b',
-              display: 'flex', alignItems: 'center',
-              gap: 6, fontSize: 12, fontWeight: 500,
-            }}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
         </div>
       </header>
 
@@ -445,7 +239,7 @@ ${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures load
                 }} />
               ))}
               <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 13 }}>
-                Analysing matches...
+                Fetching live data and analysing matches...
               </span>
             </div>
           </div>
@@ -474,7 +268,7 @@ ${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures load
                 sendMessage()
               }
             }}
-            placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Which teams score most in first half?'"
+            placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Which teams score most in the first half?'"
             className="input-field"
             rows={2}
             style={{
@@ -501,7 +295,7 @@ ${matches.length > 6 ? `<br/><em>...and ${matches.length - 6} more fixtures load
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Powered by Claude AI • Please gamble responsibly 🎗️
+          FootballIQ • Live data via API-Sports • Please gamble responsibly 🎗️
         </div>
       </div>
 
