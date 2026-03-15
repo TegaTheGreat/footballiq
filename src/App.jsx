@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Trophy, Send, RefreshCw, TrendingUp } from 'lucide-react'
+import { Trophy, Send, RefreshCw, TrendingUp, Image, X } from 'lucide-react'
 
 const QUICK_QUESTIONS = [
   "Best 5 bets this weekend across all leagues?",
@@ -18,35 +18,76 @@ export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
     content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
-I fetch live fixtures and standings every time you ask, and I track every prediction I make so I get smarter over time.<br/><br/>
-<strong>Ask me anything or click a quick question below! 👇</strong>`
+I know every fixture across all major leagues this season. You can also upload screenshots of fixture lists, league tables, team news or anything else and I'll read them instantly.<br/><br/>
+<strong>Ask me anything or upload an image below! 👇</strong>`
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [seasonStats, setSeasonStats] = useState(null)
+  const [uploadedImage, setUploadedImage] = useState(null)
+  const [imageBase64, setImageBase64] = useState(null)
+  const [imageType, setImageType] = useState(null)
   const messagesEndRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const base64 = event.target.result.split(',')[1]
+      setImageBase64(base64)
+      setImageType(file.type)
+      setUploadedImage(URL.createObjectURL(file))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = () => {
+    setUploadedImage(null)
+    setImageBase64(null)
+    setImageType(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
-    if (!text || loading) return
+    if (!text && !imageBase64 || loading) return
 
     setInput('')
     setLoading(true)
 
-    const userMessage = { role: 'user', content: text }
+    // Build user message display
+    const userContent = text || 'Analyze this image and give me predictions'
+    const userMessage = {
+      role: 'user',
+      content: uploadedImage
+        ? `${userContent}<br/><img src="${uploadedImage}" style="max-width:100%;border-radius:8px;margin-top:8px"/>`
+        : userContent
+    }
     setMessages(prev => [...prev, userMessage])
+
+    // Clear image after sending
+    const sentImage = imageBase64
+    const sentImageType = imageType
+    removeImage()
 
     try {
       const response = await fetch('/api/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question: text,
-          messages: [{ role: 'user', content: text }],
+          question: userContent,
+          messages: [{ role: 'user', content: userContent }],
+          image: sentImage ? {
+            base64: sentImage,
+            type: sentImageType,
+          } : null,
         }),
       })
 
@@ -57,7 +98,6 @@ I fetch live fixtures and standings every time you ask, and I track every predic
 
       const data = await response.json()
 
-      // Update season stats if returned
       if (data.seasonStats) {
         setSeasonStats(data.seasonStats)
       }
@@ -131,7 +171,6 @@ I fetch live fixtures and standings every time you ask, and I track every predic
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Season Stats */}
           {seasonStats && seasonStats.total > 0 && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -152,7 +191,7 @@ I fetch live fixtures and standings every time you ask, and I track every predic
             onClick={() => {
               setMessages([{
                 role: 'assistant',
-                content: `👋 New chat started! Ask me anything about upcoming matches. 👇`
+                content: `👋 New chat started! Ask me anything or upload an image. 👇`
               }])
             }}
             style={{
@@ -289,13 +328,46 @@ I fetch live fixtures and standings every time you ask, and I track every predic
                 }} />
               ))}
               <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 13 }}>
-                Fetching live data and analysing...
+                Analysing...
               </span>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Image Preview */}
+      {uploadedImage && (
+        <div style={{
+          padding: '8px 24px',
+          background: '#ffffff',
+          borderTop: '1px solid #e2e8f0',
+          maxWidth: 960, width: '100%', margin: '0 auto',
+        }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            background: '#f0f7ff', border: '1px solid #bfdbfe',
+            borderRadius: 10, padding: '6px 10px',
+          }}>
+            <img
+              src={uploadedImage}
+              alt="upload preview"
+              style={{ height: 40, width: 40, objectFit: 'cover', borderRadius: 6 }}
+            />
+            <span style={{ fontSize: 12, color: '#1d4ed8' }}>Image ready to send</span>
+            <button
+              onClick={removeImage}
+              style={{
+                background: 'none', border: 'none',
+                cursor: 'pointer', color: '#94a3b8',
+                display: 'flex', alignItems: 'center',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div style={{
@@ -309,6 +381,33 @@ I fetch live fixtures and standings every time you ask, and I track every predic
           display: 'flex', gap: 12,
           alignItems: 'flex-end',
         }}>
+          {/* Image Upload Button */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            style={{
+              background: uploadedImage ? '#dbeafe' : '#f8faff',
+              border: `1px solid ${uploadedImage ? '#3b82f6' : '#e2e8f0'}`,
+              borderRadius: 12,
+              padding: '12px',
+              cursor: 'pointer',
+              color: uploadedImage ? '#1d4ed8' : '#94a3b8',
+              display: 'flex', alignItems: 'center',
+              flexShrink: 0,
+              transition: 'all 0.2s',
+            }}
+            title="Upload image"
+          >
+            <Image size={20} />
+          </button>
+
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -318,7 +417,10 @@ I fetch live fixtures and standings every time you ask, and I track every predic
                 sendMessage()
               }
             }}
-            placeholder="Ask anything... e.g. 'Best bets this weekend?' or 'Show me my win rate'"
+            placeholder={uploadedImage
+              ? "Add a question about this image or just hit send..."
+              : "Ask anything or upload an image of fixtures, tables, team news..."
+            }
             className="input-field"
             rows={2}
             style={{
@@ -328,12 +430,12 @@ I fetch live fixtures and standings every time you ask, and I track every predic
           />
           <button
             onClick={() => sendMessage()}
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && !imageBase64)}
             className="btn-primary"
             style={{
               padding: '12px 20px',
               borderRadius: 12,
-              opacity: loading || !input.trim() ? 0.5 : 1,
+              opacity: loading || (!input.trim() && !imageBase64) ? 0.5 : 1,
               display: 'flex', alignItems: 'center', gap: 8,
               flexShrink: 0,
             }}
@@ -345,7 +447,7 @@ I fetch live fixtures and standings every time you ask, and I track every predic
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Live data via API-Sports • Predictions tracked automatically • Please gamble responsibly 🎗️
+          FootballIQ • Upload images of fixtures or tables • Predictions tracked automatically • Please gamble responsibly 🎗️
         </div>
       </div>
 
