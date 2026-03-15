@@ -5,6 +5,10 @@
 [functions]
   directory = "netlify/functions"
 
+[[edge_functions]]
+  path = "/api/predict"
+  function = "predict"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
