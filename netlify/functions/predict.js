@@ -17,14 +17,14 @@ export default async (req) => {
 
     const bodyText = await req.text()
     const body = JSON.parse(bodyText)
-    const { messages, question } = body
+    const { messages, question, image } = body
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
     const season = 2025
 
     // ============================================
-    // STEP 1: FETCH PREDICTION HISTORY FROM BLOBS
+    // STEP 1: FETCH PREDICTION HISTORY
     // ============================================
     let predictionHistory = []
     let seasonStats = { total: 0, won: 0, lost: 0, pending: 0, winRate: 0 }
@@ -45,7 +45,6 @@ export default async (req) => {
     // STEP 2: CHECK RESULTS FOR PENDING PREDICTIONS
     // ============================================
     const pendingPredictions = predictionHistory.filter(p => p.status === 'pending')
-
     if (pendingPredictions.length > 0 && APISPORTS_KEY) {
       try {
         for (const pred of pendingPredictions) {
@@ -66,7 +65,6 @@ export default async (req) => {
             const awayWon = awayGoals > homeGoals
             const draw = homeGoals === awayGoals
 
-            // Check if prediction was correct
             let correct = false
             if (pred.pick === 'home' && homeWon) correct = true
             if (pred.pick === 'away' && awayWon) correct = true
@@ -81,19 +79,16 @@ export default async (req) => {
           }
         }
 
-        // Update stats
         const resolved = predictionHistory.filter(p => p.status !== 'pending')
         const won = resolved.filter(p => p.status === 'won').length
-        const lost = resolved.filter(p => p.status === 'lost').length
         seasonStats = {
           total: predictionHistory.length,
           won,
-          lost,
-          pending: pendingPredictions.length,
+          lost: resolved.filter(p => p.status === 'lost').length,
+          pending: predictionHistory.filter(p => p.status === 'pending').length,
           winRate: resolved.length > 0 ? Math.round((won / resolved.length) * 100) : 0
         }
 
-        // Save updated history
         const store = getStore('footballiq-predictions')
         await store.set('season-2025-26', JSON.stringify({
           predictions: predictionHistory,
@@ -106,138 +101,12 @@ export default async (req) => {
     }
 
     // ============================================
-    // STEP 3: FETCH LIVE FIXTURES AND STANDINGS
-    // ============================================
-    let fixturesContext = ''
-    let standingsContext = ''
-    let totalFixtures = 0
-
-    try {
-      const [
-        plFixtures, bundesFixtures, serieAFixtures,
-        laLigaFixtures, ligue1Fixtures, eredivisieFixtures,
-        championFixtures, europaFixtures, scottishFixtures,
-        belgiumFixtures, portugFixtures,
-        plStandings, bundesStandings, serieAStandings,
-        laLigaStandings, ligue1Standings,
-        eredivisieStandings, belgiumStandings, portugStandings
-      ] = await Promise.all([
-        fetch(`https://v3.football.api-sports.io/fixtures?league=39&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=78&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=135&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=140&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=61&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=88&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=2&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=3&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=179&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=144&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/fixtures?league=94&season=${season}&next=20`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => ({ response: [] })),
-        fetch(`https://v3.football.api-sports.io/standings?league=39&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=78&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=135&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=140&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=61&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=88&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=144&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-        fetch(`https://v3.football.api-sports.io/standings?league=94&season=${season}`, { headers: { 'x-apisports-key': APISPORTS_KEY } }).then(r => r.json()).catch(() => null),
-      ])
-
-      // Build team stats
-      const teamStats = {}
-      const allStandings = [plStandings, bundesStandings, serieAStandings, laLigaStandings, ligue1Standings, eredivisieStandings, belgiumStandings, portugStandings]
-      allStandings.forEach(data => {
-        if (!data?.response) return
-        data.response.forEach(league => {
-          league.league?.standings?.[0]?.forEach(team => {
-            if (!team?.team?.name) return
-            teamStats[team.team.name] = {
-              league: league.league?.name,
-              position: team.rank,
-              points: team.points,
-              played: team.all?.played,
-              won: team.all?.win,
-              drawn: team.all?.draw,
-              lost: team.all?.lose,
-              goalsFor: team.all?.goals?.for,
-              goalsAgainst: team.all?.goals?.against,
-              form: team.form || '',
-              homeWon: team.home?.win,
-              homePlayed: team.home?.played,
-              homeGF: team.home?.goals?.for,
-              homeGA: team.home?.goals?.against,
-              awayWon: team.away?.win,
-              awayPlayed: team.away?.played,
-              awayGF: team.away?.goals?.for,
-              awayGA: team.away?.goals?.against,
-            }
-          })
-        })
-      })
-
-      // Build fixtures context
-      const allFixtureSets = [
-        { data: plFixtures, name: 'Premier League' },
-        { data: bundesFixtures, name: 'Bundesliga' },
-        { data: serieAFixtures, name: 'Serie A' },
-        { data: laLigaFixtures, name: 'La Liga' },
-        { data: ligue1Fixtures, name: 'Ligue 1' },
-        { data: eredivisieFixtures, name: 'Eredivisie' },
-        { data: championFixtures, name: 'Champions League' },
-        { data: europaFixtures, name: 'Europa League' },
-        { data: scottishFixtures, name: 'Scottish Premiership' },
-        { data: belgiumFixtures, name: 'Pro League Belgium' },
-        { data: portugFixtures, name: 'Primeira Liga' },
-      ]
-
-      const newPredictions = []
-
-      allFixtureSets.forEach(({ data, name }) => {
-        if (!data?.response?.length) return
-        fixturesContext += `\n=== ${name} ===\n`
-        data.response.forEach(f => {
-          if (!f?.teams?.home?.name) return
-          totalFixtures++
-          const date = new Date(f.fixture?.date).toLocaleDateString('en-GB', {
-            weekday: 'short', day: 'numeric', month: 'short',
-            hour: '2-digit', minute: '2-digit'
-          })
-          const home = f.teams.home.name
-          const away = f.teams.away.name
-          const homeS = teamStats[home]
-          const awayS = teamStats[away]
-          fixturesContext += `\n${date}: ${home} vs ${away} [ID:${f.fixture?.id}]\n`
-          if (homeS) fixturesContext += `  ${home}: Pos${homeS.position} ${homeS.points}pts Form:${homeS.form} GF${homeS.goalsFor} GA${homeS.goalsAgainst} HomeW${homeS.homeWon}/${homeS.homePlayed} HomeGF${homeS.homeGF} HomeGA${homeS.homeGA}\n`
-          if (awayS) fixturesContext += `  ${away}: Pos${awayS.position} ${awayS.points}pts Form:${awayS.form} GF${awayS.goalsFor} GA${awayS.goalsAgainst} AwayW${awayS.awayWon}/${awayS.awayPlayed} AwayGF${awayS.awayGF} AwayGA${awayS.awayGA}\n`
-        })
-      })
-
-      // Build standings context
-      const leagueGroups = {}
-      Object.entries(teamStats).forEach(([team, data]) => {
-        if (!leagueGroups[data.league]) leagueGroups[data.league] = []
-        leagueGroups[data.league].push({ team, ...data })
-      })
-      Object.entries(leagueGroups).forEach(([league, teams]) => {
-        standingsContext += `\n${league}:\n`
-        teams.sort((a, b) => a.position - b.position).slice(0, 10).forEach(t => {
-          standingsContext += `${t.position}. ${t.team} | ${t.points}pts | GF${t.goalsFor} GA${t.goalsAgainst} | Form:${t.form}\n`
-        })
-      })
-
-    } catch (e) {
-      console.log('API fetch error:', e.message)
-    }
-
-    // ============================================
-    // STEP 4: BUILD PREDICTION HISTORY CONTEXT
+    // STEP 3: BUILD PREDICTION HISTORY CONTEXT
     // ============================================
     let historyContext = ''
     if (predictionHistory.length > 0) {
       historyContext = `\n=== YOUR PREDICTION HISTORY THIS SEASON (2025/26) ===\n`
       historyContext += `Overall: ${seasonStats.won}W ${seasonStats.lost}L ${seasonStats.pending} Pending | Win Rate: ${seasonStats.winRate}%\n\n`
-
-      // Show last 20 predictions
       const recent = predictionHistory.slice(-20)
       recent.forEach(p => {
         const result = p.status === 'won' ? '✅ WON' : p.status === 'lost' ? '❌ LOST' : '⏳ PENDING'
@@ -246,52 +115,80 @@ export default async (req) => {
         historyContext += '\n'
       })
 
-      // Identify patterns
       const wonPicks = predictionHistory.filter(p => p.status === 'won').map(p => p.market)
-      const lostPicks = predictionHistory.filter(p => p.status === 'lost').map(p => p.market)
       const bestMarket = wonPicks.length > 0
-        ? Object.entries(wonPicks.reduce((acc, m) => ({ ...acc, [m]: (acc[m] || 0) + 1 }), {})).sort((a, b) => b[1] - a[1])[0]?.[0]
+        ? Object.entries(wonPicks.reduce((acc, m) => ({ ...acc, [m]: (acc[m] || 0) + 1 }), {}))
+            .sort((a, b) => b[1] - a[1])[0]?.[0]
         : null
-      if (bestMarket) historyContext += `\nBest performing market: ${bestMarket}\n`
+      if (bestMarket) historyContext += `\nBest performing market so far: ${bestMarket}\n`
     }
 
     // ============================================
-    // STEP 5: BUILD SYSTEM PROMPT
+    // STEP 4: BUILD SYSTEM PROMPT
     // ============================================
-    const hasLiveData = totalFixtures > 0
     const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season.
 
-TODAY: ${today}
+TODAY IS: ${today} (March 15 2026)
 
-${hasLiveData ? `LIVE DATA FROM API (${totalFixtures} fixtures loaded):
-${fixturesContext}
+YOU HAVE ACCESS TO WEB SEARCH — use it to find:
+- Today's and this weekend's fixtures across all major leagues
+- Recent results and scores
+- Current league standings and form
+- Injury and team news
+- Head to head records
 
-CURRENT STANDINGS:
-${standingsContext}` : `NOTE: Live API data unavailable right now (daily limit reached). Use your comprehensive knowledge of the 2025/26 season to identify upcoming fixtures and provide predictions. You know all the leagues, standings, form and results up to today. Proceed confidently without mentioning the API.`}
+ALWAYS search for live data before answering prediction questions. Search for things like:
+- "Premier League fixtures today March 15 2026"
+- "Bundesliga results this weekend"
+- "Serie A standings 2025/26"
+- "Barcelona vs Sevilla preview March 2026"
 
-${historyContext ? historyContext : ''}
+${historyContext}
 
 YOUR RULES:
-1. ${hasLiveData ? 'Use the live fixture and standings data above' : 'Use your 2025/26 season knowledge'} for all predictions
-2. Learn from prediction history — if certain markets or teams are performing well or poorly adjust your confidence accordingly
+1. Always search for current fixture and result data before predicting
+2. Use prediction history to identify your strongest markets and adjust confidence
 3. Never refuse to predict — always provide confident analysis
-4. When listing predictions use this HTML table:
+4. For multiple predictions use this exact HTML table:
 <table>
 <thead><tr><th>Match</th><th>League</th><th>Pick</th><th>Market</th><th>Confidence</th><th>Risk</th></tr></thead>
 <tbody>
 <tr><td>Liverpool vs Tottenham</td><td>Premier League</td><td>Liverpool Win</td><td>Match Result</td><td>78%</td><td>Low</td></tr>
 </tbody>
 </table>
-5. After your predictions include a JSON block at the end (hidden from display) with this format:
+5. After predictions include hidden JSON:
 <!--PREDICTIONS_JSON
-[{"match":"Liverpool vs Tottenham","fixtureId":123456,"date":"${today}","pick":"home","pickDescription":"Liverpool Win","market":"Match Result","confidence":78,"league":"Premier League"}]
+[{"match":"Liverpool vs Tottenham","fixtureId":0,"date":"${today}","pick":"home","pickDescription":"Liverpool Win","market":"Match Result","confidence":78,"league":"Premier League"}]
 PREDICTIONS_JSON-->
-6. Consider home advantage, form, goals scored and conceded, home and away records and prediction history patterns
-7. Be decisive and confident
-8. End with responsible gambling reminder`
+6. Be decisive and confident
+7. Always end with responsible gambling reminder`
 
     // ============================================
-    // STEP 6: CALL CLAUDE
+    // STEP 5: BUILD MESSAGES WITH OPTIONAL IMAGE
+    // ============================================
+    let userContent
+
+    if (image) {
+      userContent = [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: image.type,
+            data: image.base64,
+          }
+        },
+        {
+          type: 'text',
+          text: question || 'Analyze this image and give me predictions based on what you see. Search for any additional context you need.'
+        }
+      ]
+    } else {
+      userContent = question || 'Give me the best bets this weekend'
+    }
+
+    // ============================================
+    // STEP 6: CALL CLAUDE WITH WEB SEARCH
     // ============================================
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -304,14 +201,18 @@ PREDICTIONS_JSON-->
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 4000,
         system: systemPrompt,
-        messages: (messages || [{ role: 'user', content: question }])
-          .slice(-2)
-          .map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string'
-              ? m.content.replace(/<[^>]*>/g, '').slice(0, 1000)
-              : m.content
-          })),
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+          }
+        ],
+        messages: [
+          {
+            role: 'user',
+            content: userContent
+          }
+        ],
       }),
     })
 
@@ -324,18 +225,89 @@ PREDICTIONS_JSON-->
     }
 
     const data = await claudeResponse.json()
-    const responseText = data.content?.[0]?.text || ''
 
     // ============================================
-    // STEP 7: EXTRACT AND SAVE NEW PREDICTIONS
+    // STEP 7: HANDLE TOOL USE RESPONSES
+    // Extract final text from potentially multi-turn tool use
+    // ============================================
+    let finalMessages = [{ role: 'user', content: userContent }]
+    let currentData = data
+    let iterations = 0
+    const maxIterations = 5
+
+    while (
+      currentData.stop_reason === 'tool_use' &&
+      iterations < maxIterations
+    ) {
+      iterations++
+
+      // Add assistant response to messages
+      finalMessages.push({
+        role: 'assistant',
+        content: currentData.content
+      })
+
+      // Process tool calls
+      const toolResults = []
+      for (const block of currentData.content) {
+        if (block.type === 'tool_use') {
+          // Web search results come back automatically
+          // We just pass them back as tool results
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: 'Search completed. Use the results to provide accurate predictions.'
+          })
+        }
+      }
+
+      if (toolResults.length === 0) break
+
+      finalMessages.push({
+        role: 'user',
+        content: toolResults
+      })
+
+      // Continue conversation
+      const continueResponse = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 4000,
+          system: systemPrompt,
+          tools: [
+            {
+              type: 'web_search_20250305',
+              name: 'web_search',
+            }
+          ],
+          messages: finalMessages,
+        }),
+      })
+
+      currentData = await continueResponse.json()
+    }
+
+    // Extract final text response
+    const finalText = currentData.content
+      ?.filter(block => block.type === 'text')
+      ?.map(block => block.text)
+      ?.join('\n') || ''
+
+    // ============================================
+    // STEP 8: SAVE NEW PREDICTIONS
     // ============================================
     try {
-      const jsonMatch = responseText.match(/<!--PREDICTIONS_JSON\s*([\s\S]*?)\s*PREDICTIONS_JSON-->/)
+      const jsonMatch = finalText.match(/<!--PREDICTIONS_JSON\s*([\s\S]*?)\s*PREDICTIONS_JSON-->/)
       if (jsonMatch) {
         const newPreds = JSON.parse(jsonMatch[1])
         const store = getStore('footballiq-predictions')
 
-        // Add new predictions to history
         newPreds.forEach(pred => {
           predictionHistory.push({
             ...pred,
@@ -344,7 +316,6 @@ PREDICTIONS_JSON-->
           })
         })
 
-        // Update stats
         const resolved = predictionHistory.filter(p => p.status !== 'pending')
         const won = resolved.filter(p => p.status === 'won').length
         seasonStats = {
@@ -356,7 +327,7 @@ PREDICTIONS_JSON-->
         }
 
         await store.set('season-2025-26', JSON.stringify({
-          predictions: predictionHistory.slice(-500), // Keep last 500
+          predictions: predictionHistory.slice(-500),
           stats: seasonStats,
           updatedAt: today
         }))
@@ -365,12 +336,11 @@ PREDICTIONS_JSON-->
       console.log('Error saving predictions:', e.message)
     }
 
-    // Clean JSON from response before sending to frontend
-    const cleanResponse = responseText.replace(/<!--PREDICTIONS_JSON[\s\S]*?PREDICTIONS_JSON-->/g, '')
-    data.content[0].text = cleanResponse
+    // Clean JSON from response
+    const cleanResponse = finalText.replace(/<!--PREDICTIONS_JSON[\s\S]*?PREDICTIONS_JSON-->/g, '')
 
     return new Response(JSON.stringify({
-      ...data,
+      content: [{ type: 'text', text: cleanResponse }],
       seasonStats,
     }), {
       headers: {
