@@ -11,25 +11,6 @@ export default async (req) => {
 
   try {
     const APISPORTS_KEY = process.env.APISPORTS_KEY
-    const headers = { 'x-apisports-key': APISPORTS_KEY }
-
-    // Smart season detection — football seasons vary by league
-    const now = new Date()
-    const month = now.getMonth() + 1 // 1-12
-    const year = now.getFullYear()
-
-    // Most European leagues run Aug-May, so after June use current year
-    // South American leagues run Feb-Dec, so use current year always
-    const getSeasonForLeague = (leagueId) => {
-      const southAmericanLeagues = [71, 128, 262] // Brazil, Argentina, Mexico
-      const summerLeagues = [307] // Saudi runs Feb-Nov
-      
-      if (southAmericanLeagues.includes(leagueId) || summerLeagues.includes(leagueId)) {
-        return year
-      }
-      // European leagues — if before July use previous year as season start
-      return month < 7 ? year - 1 : year
-    }
 
     const leagueIds = [
       39,   // Premier League
@@ -51,18 +32,22 @@ export default async (req) => {
       71,   // Brazilian Serie A
     ]
 
-    // Get date range — today to next 7 days
-    const today = now.toISOString().split('T')[0]
-    const nextWeek = new Date(now)
-    nextWeek.setDate(now.getDate() + 7)
-    const to = nextWeek.toISOString().split('T')[0]
-
-    // Fetch fixtures for all leagues in parallel
+    // Fetch next 20 fixtures per league — no date or status filter
     const requests = leagueIds.map(leagueId => {
-      const season = getSeasonForLeague(leagueId)
+      // Season logic — European leagues started Aug 2025 = season 2025
+      // South American leagues use current year
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth() + 1
+      const southAmerican = [71, 128, 262]
+      const summer = [307]
+      const season = southAmerican.includes(leagueId) || summer.includes(leagueId)
+        ? year
+        : month < 7 ? year - 1 : year
+
       return fetch(
-        `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&from=${today}&to=${to}&status=NS`,
-        { headers }
+        `https://v3.football.api-sports.io/fixtures?league=${leagueId}&season=${season}&next=20`,
+        { headers: { 'x-apisports-key': APISPORTS_KEY } }
       )
       .then(r => r.json())
       .catch(() => ({ response: [] }))
@@ -74,6 +59,7 @@ export default async (req) => {
     results.forEach(data => {
       if (!data?.response) return
       data.response.forEach(f => {
+        if (!f?.teams?.home?.name) return
         allFixtures.push({
           id: f.fixture?.id,
           date: f.fixture?.date,
@@ -116,3 +102,8 @@ export default async (req) => {
 export const config = {
   path: '/api/fixtures'
 }
+```
+
+Commit → **Trigger deploy** → then open this in your browser to test:
+```
+https://theoddscity.netlify.app/api/fixtures
