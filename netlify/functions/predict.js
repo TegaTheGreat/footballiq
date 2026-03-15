@@ -12,11 +12,10 @@ export default async (req) => {
   try {
     const body = await req.json()
 
-    // Trim messages to avoid hitting limits
     const messages = body.messages.map(m => ({
       role: m.role,
       content: typeof m.content === 'string'
-        ? m.content.slice(0, 8000)
+        ? m.content.slice(0, 6000)
         : m.content
     }))
 
@@ -67,5 +66,6 @@ export default async (req) => {
 }
 
 export const config = {
-  path: '/api/predict'
+  path: '/api/predict',
+  type: 'experimental-background'
 }
