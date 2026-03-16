@@ -13,6 +13,8 @@ export default async (req) => {
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
     const ODDS_API_KEY = process.env.ODDS_API_KEY
     const APISPORTS_KEY = process.env.APISPORTS_KEY
+    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY
+    const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID
 
     const bodyText = await req.text()
     const body = JSON.parse(bodyText)
@@ -23,11 +25,60 @@ export default async (req) => {
     const season = 2025
 
     // ============================================
-    // STEP 1: FETCH LIVE FIXTURES FROM ODDS API
+    // STEP 1: GOOGLE SEARCH FOR LIVE DATA
+    // ============================================
+    let googleContext = ''
+
+    if (GOOGLE_API_KEY && GOOGLE_CSE_ID) {
+      try {
+        const searchQueries = [
+          `football fixtures today ${today} results scores`,
+          `Premier League Bundesliga Serie A La Liga fixtures ${today}`,
+          `Champions League Europa League results this week March 2026`,
+          `football injury news team news March 2026`,
+        ]
+
+        // Add question-specific search
+        if (question && question.length > 10) {
+          const cleanQ = question.replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 100)
+          searchQueries.push(`${cleanQ} football 2026`)
+        }
+
+        const searchResults = await Promise.all(
+          searchQueries.slice(0, 3).map(q =>
+            fetch(
+              `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&q=${encodeURIComponent(q)}&num=5&dateRestrict=d3`
+            )
+            .then(r => r.json())
+            .catch(() => null)
+          )
+        )
+
+        const snippets = []
+        searchResults.forEach((result, idx) => {
+          if (!result?.items) return
+          result.items.forEach(item => {
+            if (item.snippet) {
+              snippets.push(`[${searchQueries[idx]}] ${item.title}: ${item.snippet}`)
+            }
+          })
+        })
+
+        if (snippets.length > 0) {
+          googleContext = `\n=== LIVE GOOGLE SEARCH RESULTS (fetched right now) ===\n`
+          googleContext += snippets.join('\n')
+          googleContext += '\n=== END GOOGLE RESULTS ===\n'
+        }
+      } catch (e) {
+        console.log('Google search error:', e.message)
+      }
+    }
+
+    // ============================================
+    // STEP 2: FETCH LIVE FIXTURES FROM ODDS API
     // ============================================
     const sportsToFetch = [
       { key: 'soccer_epl', name: 'Premier League' },
-      { key: 'soccer_epl_cup', name: 'FA Cup' },
       { key: 'soccer_germany_bundesliga', name: 'Bundesliga' },
       { key: 'soccer_italy_serie_a', name: 'Serie A' },
       { key: 'soccer_spain_la_liga', name: 'La Liga' },
@@ -38,7 +89,6 @@ export default async (req) => {
       { key: 'soccer_scotland_premiership', name: 'Scottish Premiership' },
       { key: 'soccer_uefa_champs_league', name: 'Champions League' },
       { key: 'soccer_uefa_europa_league', name: 'Europa League' },
-      { key: 'soccer_uefa_europa_conference_league', name: 'Conference League' },
       { key: 'soccer_brazil_campeonato', name: 'Brazilian Serie A' },
       { key: 'soccer_argentina_primera_division', name: 'Argentine Primera' },
       { key: 'soccer_saudi_professional_league', name: 'Saudi Pro League' },
@@ -87,7 +137,6 @@ export default async (req) => {
             fixturesContext += `${date}: ${fixture.home_team} vs ${fixture.away_team}`
             if (homeOdds) {
               fixturesContext += ` | Home:${homeOdds} Draw:${drawOdds || 'N/A'} Away:${awayOdds}`
-              // Flag value indicators
               if (homeOdds <= 1.4) fixturesContext += ` [STRONG FAVOURITE]`
               if (homeOdds >= 3.0 && awayOdds >= 3.0) fixturesContext += ` [OPEN MATCH]`
             }
@@ -100,7 +149,7 @@ export default async (req) => {
     }
 
     // ============================================
-    // STEP 2: FETCH STANDINGS FROM API-SPORTS
+    // STEP 3: FETCH STANDINGS FROM API-SPORTS
     // ============================================
     let standingsContext = ''
 
@@ -166,34 +215,40 @@ export default async (req) => {
     }
 
     // ============================================
-    // STEP 3: BUILD SYSTEM PROMPT
+    // STEP 4: BUILD SYSTEM PROMPT
     // ============================================
-    const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You are warm, intelligent and conversational — like a brilliant friend who happens to be a professional analyst.
+    const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You are warm, intelligent and conversational — like a brilliant friend who is also a professional analyst.
 
 TODAY: ${today}
 
+${googleContext ? `LIVE GOOGLE SEARCH DATA (searched right now):
+${googleContext}` : ''}
+
 ${totalFixtures > 0
-  ? `LIVE FIXTURES WITH REAL BETTING ODDS (${totalFixtures} matches loaded):
+  ? `LIVE FIXTURES WITH REAL BETTING ODDS (${totalFixtures} matches):
 ${fixturesContext}`
-  : `No live fixture data right now — use your comprehensive 2025/26 season knowledge confidently.`}
+  : 'Use your 2025/26 season knowledge for fixtures.'}
 
 ${standingsContext}
 
 HOW YOU COMMUNICATE:
-- You are conversational and warm — not a robot outputting data
-- You think out loud and explain your reasoning
-- You reference the actual odds in your analysis — "bookmakers have them at 1.65 which I think is fair" or "at 3.2 that's actually value"
-- You remember everything said earlier in this conversation and build on it naturally
-- For long responses you work through things section by section — don't dump everything at once
-- You show genuine enthusiasm for the game
-- You are honest when a pick is risky
-- You never cut off mid-thought — always complete your analysis fully
+- Warm, intelligent and conversational — not robotic
+- Think out loud and explain reasoning clearly
+- Reference actual odds — "bookmakers have them at 1.65 which I agree with" or "at 3.2 that's actually great value"
+- Remember everything in this conversation and build on it naturally
+- Work through predictions section by section — never dump everything at once
+- Show genuine enthusiasm for football
+- Be honest when a pick is risky
+- NEVER say you cannot access live data — you have Google search results, odds and standings above
+- NEVER ask users to send screenshots before predicting
+- Always complete your analysis fully — never cut off
 
-FORMATTING RULES — FOLLOW EXACTLY:
-- Use ## for main section headers
-- Use ### for sub-headers
-- Use **bold** for key stats and picks
+FORMATTING:
+- Use ## for main headers
+- Use ### for sub headers
+- Use **bold** for key picks and stats
 - Use bullet points with - for lists
+- Do NOT use --- as dividers
 - For prediction tables use this exact HTML:
 <table>
 <thead><tr><th>Match</th><th>League</th><th>Pick</th><th>Market</th><th>Odds</th><th>Confidence</th><th>Risk</th></tr></thead>
@@ -201,25 +256,15 @@ FORMATTING RULES — FOLLOW EXACTLY:
 <tr><td>Liverpool vs Tottenham</td><td>Premier League</td><td>Liverpool Win</td><td>Match Result</td><td>1.65</td><td>82%</td><td>Low</td></tr>
 </tbody>
 </table>
-- Separate sections clearly with a blank line
-- Do NOT use --- as separators (they show as literal text)
-- Keep paragraphs tight — max 3 sentences per paragraph
-- When building accumulators show the combined odds calculation
-
-USING THE DATA:
-- Cross reference odds with form and standings
-- Lower odds = market favourite = use as supporting evidence
-- Flag genuine value where your analysis disagrees with the odds
-- Use home/away goal records to predict scoring patterns
-- Use form sequence to identify momentum
+- Keep paragraphs tight — max 3 sentences
+- Show combined odds calculations for accumulators
 
 Always end with a brief responsible gambling note.`
 
     // ============================================
-    // STEP 4: BUILD MESSAGES WITH IMAGE SUPPORT
+    // STEP 5: BUILD MESSAGES
     // ============================================
     let userContent
-
     const imageList = images || (image ? [image] : [])
 
     if (imageList.length > 0) {
@@ -235,14 +280,13 @@ Always end with a brief responsible gambling note.`
         ...imageBlocks,
         {
           type: 'text',
-          text: question || 'Analyze these images and give me full predictions and insights'
+          text: question || 'Analyze these images and give me full predictions'
         }
       ]
     } else {
       userContent = question || 'Give me the best bets this weekend'
     }
 
-    // Build conversation history
     const conversationHistory = (messages || [])
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .slice(-8)
@@ -259,7 +303,7 @@ Always end with a brief responsible gambling note.`
     ]
 
     // ============================================
-    // STEP 5: CALL CLAUDE WITH STREAMING
+    // STEP 6: CALL CLAUDE WITH STREAMING
     // ============================================
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -289,7 +333,7 @@ Always end with a brief responsible gambling note.`
     }
 
     // ============================================
-    // STEP 6: STREAM RESPONSE TO CLIENT
+    // STEP 7: STREAM RESPONSE TO CLIENT
     // ============================================
     const stream = new TransformStream()
     const writer = stream.writable.getWriter()
