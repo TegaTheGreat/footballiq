@@ -1,80 +1,221 @@
 import { useState, useRef, useEffect } from 'react'
-import { Trophy, Send, RefreshCw, TrendingUp, Image, X } from 'lucide-react'
+import { Trophy, Send, RefreshCw, Copy, Check, ImagePlus, X, ChevronRight } from 'lucide-react'
 
 const QUICK_QUESTIONS = [
-  "Best 5 bets this weekend across all leagues?",
-  "Which matches are most likely to have 2-3 goals?",
-  "Best clean sheet predictions this weekend?",
-  "Which home teams are banker picks this weekend?",
-  "Build me a 5 team accumulator for this weekend",
-  "Which teams are most likely to score first?",
-  "Best both teams to score picks this weekend?",
-  "Which underdogs could cause upsets this weekend?",
+  "Best 5 bets this weekend?",
+  "Top 20 predictions across all leagues",
+  "Most likely 2-3 goal matches today",
+  "Best clean sheet picks this weekend",
+  "Build me a 5 team accumulator",
+  "Which teams score first most often?",
+  "Best BTTS picks this weekend",
+  "Underdogs to watch this weekend",
 ]
+
+// Format Claude's markdown into clean HTML
+const formatMessage = (text) => {
+  return text
+    .replace(/^#{3}\s(.+)$/gm, '<h3>$1</h3>')
+    .replace(/^#{2}\s(.+)$/gm, '<h2>$1</h2>')
+    .replace(/^#{1}\s(.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/^---$/gm, '<hr/>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
+    .replace(/^\d+\.\s(.+)$/gm, '<oli>$1</oli>')
+    .replace(/(<oli>.*<\/oli>\n?)+/g, (match) => {
+      const items = match.replace(/<oli>/g, '<li>').replace(/<\/oli>/g, '</li>')
+      return `<ol>${items}</ol>`
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br/>')
+    .replace(/^(.+)$/, '<p>$1</p>')
+}
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    const plain = text
+      .replace(/<[^>]*>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    await navigator.clipboard.writeText(plain)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy response"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        background: 'none', border: '1px solid #e2e8f0',
+        borderRadius: 6, padding: '4px 8px',
+        cursor: 'pointer', fontSize: 11, fontWeight: 500,
+        color: copied ? '#16a34a' : '#94a3b8',
+        transition: 'all 0.2s',
+      }}
+      onMouseOver={e => e.currentTarget.style.borderColor = '#3b82f6'}
+      onMouseOut={e => e.currentTarget.style.borderColor = '#e2e8f0'}
+    >
+      {copied ? <Check size={12} /> : <Copy size={12} />}
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
+function MessageBubble({ msg, isLast, loading }) {
+  const isUser = msg.role === 'user'
+  const isEmpty = !msg.content && isLast && loading
+
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: isUser ? 'flex-end' : 'flex-start',
+      alignItems: 'flex-start',
+      gap: 12,
+    }}>
+      {!isUser && (
+        <div style={{
+          width: 36, height: 36, borderRadius: '10px',
+          background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'center', flexShrink: 0,
+          boxShadow: '0 2px 8px rgba(59,130,246,0.25)',
+          marginTop: 2,
+        }}>
+          <Trophy size={16} color="#fff" />
+        </div>
+      )}
+
+      <div style={{ maxWidth: isUser ? '72%' : '88%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div
+          style={{
+            background: isUser ? 'linear-gradient(135deg, #1d4ed8, #2563eb)' : '#ffffff',
+            color: isUser ? '#ffffff' : '#1e293b',
+            borderRadius: isUser ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+            padding: isUser ? '12px 16px' : '16px 20px',
+            fontSize: 14,
+            lineHeight: 1.75,
+            border: !isUser ? '1px solid #e8edf5' : 'none',
+            boxShadow: !isUser ? '0 1px 6px rgba(0,0,0,0.05)' : 'none',
+            overflowX: 'auto',
+          }}
+        >
+          {isEmpty ? (
+            <div style={{ display: 'flex', gap: 5, alignItems: 'center', padding: '2px 0' }}>
+              {[0, 1, 2].map(j => (
+                <div key={j} style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: '#3b82f6',
+                  animation: `bounce 1.2s ease infinite ${j * 0.2}s`,
+                  opacity: 0.7,
+                }} />
+              ))}
+            </div>
+          ) : (
+            <div
+              className="message-content"
+              dangerouslySetInnerHTML={{ __html: msg.content }}
+            />
+          )}
+        </div>
+
+        {!isUser && msg.content && (
+          <div style={{ paddingLeft: 4 }}>
+            <CopyButton text={msg.content} />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
-    content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
-I fetch live fixtures with real betting odds every time you ask, combined with current league standings and form.<br/><br/>
-<strong>Ask me anything or upload a screenshot below! 👇</strong>`
+    content: formatMessage(`## Welcome to FootballIQ ⚽
+
+I'm your personal football analyst — I fetch live fixtures with real betting odds, track current league standings, and give you data-driven predictions across all major leagues.
+
+**Here's what I can do:**
+- Predict match outcomes with confidence ratings
+- Identify best bets by market (BTTS, Over/Under, Match Result)
+- Build accumulators targeting specific odds
+- Analyse matches from screenshots you upload
+- Walk you through reasoning league by league
+
+Ask me anything or pick a quick question below.`)
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [uploadedImage, setUploadedImage] = useState(null)
-  const [imageBase64, setImageBase64] = useState(null)
-  const [imageType, setImageType] = useState(null)
+  const [images, setImages] = useState([]) // Multiple images
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const textareaRef = useRef(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const handleImageUpload = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const base64 = event.target.result.split(',')[1]
-      setImageBase64(base64)
-      setImageType(file.type)
-      setUploadedImage(URL.createObjectURL(file))
-    }
-    reader.readAsDataURL(file)
+    const files = Array.from(e.target.files)
+    files.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const base64 = event.target.result.split(',')[1]
+        setImages(prev => [...prev, {
+          base64,
+          type: file.type,
+          preview: URL.createObjectURL(file),
+          name: file.name,
+        }])
+      }
+      reader.readAsDataURL(file)
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const removeImage = () => {
-    setUploadedImage(null)
-    setImageBase64(null)
-    setImageType(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  const removeImage = (idx) => {
+    setImages(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const autoResize = () => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + 'px'
+    }
   }
 
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
-    if (!text && !imageBase64 || loading) return
+    if (!text && images.length === 0 || loading) return
 
     setInput('')
     setLoading(true)
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
 
-    const userContent = text || 'Analyze this image and give me predictions'
-    const userMessage = {
-      role: 'user',
-      content: uploadedImage
-        ? `${userContent}<br/><img src="${uploadedImage}" style="max-width:100%;border-radius:8px;margin-top:8px"/>`
-        : userContent
+    const userContent = text || 'Analyze these images and give me predictions'
+
+    // Build user message with image previews
+    let displayContent = userContent
+    if (images.length > 0) {
+      const imgHtml = images.map(img =>
+        `<img src="${img.preview}" style="max-width:100%;max-height:200px;border-radius:8px;margin-top:8px;display:block"/>`
+      ).join('')
+      displayContent = `${userContent}${imgHtml}`
     }
 
-    const sentImage = imageBase64
-    const sentImageType = imageType
-    removeImage()
+    const userMessage = { role: 'user', content: displayContent }
+    const sentImages = [...images]
+    setImages([])
 
     const updatedMessages = [...messages, userMessage]
-    setMessages(updatedMessages)
-
-    // Add empty assistant message for streaming
-    setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+    setMessages([...updatedMessages, { role: 'assistant', content: '' }])
 
     try {
       const response = await fetch('/api/predict', {
@@ -89,24 +230,21 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
               role: m.role,
               content: m.content.replace(/<[^>]*>/g, '').slice(0, 800)
             })),
-          image: sentImage ? {
-            base64: sentImage,
-            type: sentImageType,
-          } : null,
+          images: sentImages.length > 0 ? sentImages.map(img => ({
+            base64: img.base64,
+            type: img.type,
+          })) : null,
         }),
       })
 
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`)
-      }
+      if (!response.ok) throw new Error(`Server error: ${response.status}`)
 
       const contentType = response.headers.get('content-type')
 
       if (contentType?.includes('text/event-stream')) {
-        // Handle streaming response
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
-        let fullText = ''
+        let rawText = ''
 
         while (true) {
           const { done, value } = await reader.read()
@@ -122,13 +260,12 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
               try {
                 const parsed = JSON.parse(data)
                 if (parsed.text) {
-                  fullText += parsed.text
-                  const formatted = formatMessage(fullText)
+                  rawText += parsed.text
                   setMessages(prev => {
                     const updated = [...prev]
                     updated[updated.length - 1] = {
                       role: 'assistant',
-                      content: formatted
+                      content: formatMessage(rawText)
                     }
                     return updated
                   })
@@ -138,9 +275,8 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
           }
         }
       } else {
-        // Handle regular JSON response
         const data = await response.json()
-        if (data.content && data.content[0]) {
+        if (data.content?.[0]) {
           setMessages(prev => {
             const updated = [...prev]
             updated[updated.length - 1] = {
@@ -158,7 +294,7 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
         const updated = [...prev]
         updated[updated.length - 1] = {
           role: 'assistant',
-          content: `⚠️ Something went wrong: ${err.message}. Please try again.`
+          content: `<p>⚠️ Something went wrong: ${err.message}. Please try again.</p>`
         }
         return updated
       })
@@ -167,70 +303,109 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
     }
   }
 
-  const formatMessage = (text) => {
-    return text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/###\s(.*?)\n/g, '<h3 style="margin:12px 0 6px;color:#1d4ed8;font-size:15px">$1</h3>')
-      .replace(/##\s(.*?)\n/g, '<h2 style="margin:14px 0 8px;color:#1d4ed8;font-size:16px">$1</h2>')
-      .replace(/\n/g, '<br/>')
-  }
-
   return (
     <div style={{
       minHeight: '100vh',
-      background: '#f8faff',
+      background: '#f4f7fc',
       display: 'flex',
       flexDirection: 'column',
+      fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
     }}>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Serif+Display&display=swap');
+
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); }
+          30% { transform: translateY(-6px); }
+        }
+
+        .message-content p { margin: 0 0 10px 0; }
+        .message-content p:last-child { margin-bottom: 0; }
+        .message-content h1 { font-size: 18px; font-weight: 700; margin: 16px 0 8px; color: #1d4ed8; }
+        .message-content h2 { font-size: 16px; font-weight: 700; margin: 14px 0 6px; color: #1e40af; }
+        .message-content h3 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; color: #1d4ed8; }
+        .message-content ul { margin: 8px 0; padding-left: 20px; }
+        .message-content ol { margin: 8px 0; padding-left: 20px; }
+        .message-content li { margin: 4px 0; line-height: 1.6; }
+        .message-content hr { border: none; border-top: 1px solid #e2e8f0; margin: 12px 0; }
+        .message-content strong { font-weight: 600; color: #0f172a; }
+        .message-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; border-radius: 8px; overflow: hidden; border: 1px solid #e2e8f0; }
+        .message-content thead { background: linear-gradient(135deg, #1d4ed8, #3b82f6); color: white; }
+        .message-content thead th { padding: 10px 14px; text-align: left; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .message-content tbody tr { border-bottom: 1px solid #f0f4ff; transition: background 0.15s; }
+        .message-content tbody tr:hover { background: #f8faff; }
+        .message-content tbody tr:last-child { border-bottom: none; }
+        .message-content tbody td { padding: 9px 14px; color: #374151; font-size: 13px; }
+        .message-content tbody tr:nth-child(even) { background: #fafbff; }
+
+        .quick-btn:hover { background: #dbeafe !important; border-color: #3b82f6 !important; color: #1d4ed8 !important; }
+        .send-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .upload-btn:hover { border-color: #3b82f6 !important; color: #1d4ed8 !important; }
+      `}</style>
+
       {/* Header */}
       <header style={{
-        borderBottom: '1px solid #e2e8f0',
-        padding: '14px 24px',
+        borderBottom: '1px solid #e8edf5',
+        padding: '14px 28px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         background: '#ffffff',
-        boxShadow: '0 1px 8px rgba(0,0,0,0.06)',
+        boxShadow: '0 1px 12px rgba(0,0,0,0.05)',
         position: 'sticky',
         top: 0,
         zIndex: 100,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 38, height: 38, borderRadius: '10px',
+            width: 40, height: 40, borderRadius: 12,
             background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(59,130,246,0.3)',
+            boxShadow: '0 4px 12px rgba(59,130,246,0.3)',
           }}>
-            <Trophy size={20} color="#ffffff" />
+            <Trophy size={20} color="#fff" />
           </div>
           <div>
             <div style={{
-              fontWeight: 800, fontSize: 18,
-              letterSpacing: '-0.5px', color: '#1a1a2e'
+              fontFamily: "'DM Serif Display', serif",
+              fontSize: 20, fontWeight: 400,
+              color: '#0f172a', letterSpacing: '-0.3px',
+              lineHeight: 1,
             }}>
-              Football<span className="gradient-text">IQ</span>
+              Football<span style={{ color: '#2563eb' }}>IQ</span>
             </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: -2 }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontWeight: 500 }}>
               AI Match Predictor
             </div>
           </div>
         </div>
+
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="badge badge-green">✅ Live Odds + Standings</span>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: '#f0fdf4', border: '1px solid #bbf7d0',
+            borderRadius: 20, padding: '5px 12px',
+          }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#22c55e',
+              boxShadow: '0 0 0 2px rgba(34,197,94,0.3)',
+            }} />
+            <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Live Odds</span>
+          </div>
           <button
             onClick={() => setMessages([{
               role: 'assistant',
-              content: `👋 New chat! Ask me anything about upcoming matches. 👇`
+              content: formatMessage('## New Analysis Session\n\nReady for a fresh set of predictions! Ask me about any league, fixture or market. 👇')
             }])}
             style={{
-              background: '#f8faff',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8, padding: '6px 12px',
+              background: '#f8faff', border: '1px solid #e2e8f0',
+              borderRadius: 8, padding: '7px 14px',
               cursor: 'pointer', color: '#64748b',
               display: 'flex', alignItems: 'center',
               gap: 6, fontSize: 12, fontWeight: 500,
+              transition: 'all 0.2s',
             }}
           >
             <RefreshCw size={12} /> New Chat
@@ -240,39 +415,34 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
 
       {/* Quick Questions */}
       <div style={{
-        borderBottom: '1px solid #e2e8f0',
-        padding: '10px 24px',
+        borderBottom: '1px solid #e8edf5',
+        padding: '10px 28px',
         display: 'flex', gap: 8,
         overflowX: 'auto', background: '#ffffff',
+        scrollbarWidth: 'none',
       }}>
         {QUICK_QUESTIONS.map((q, i) => (
           <button
             key={i}
+            className="quick-btn"
             onClick={() => sendMessage(q)}
             disabled={loading}
             style={{
-              background: '#f0f7ff',
-              border: '1px solid #bfdbfe',
-              color: '#1d4ed8',
+              background: '#f8faff',
+              border: '1px solid #e2e8f0',
+              color: '#475569',
               borderRadius: 20,
               padding: '6px 14px',
               fontSize: 12, fontWeight: 500,
               cursor: loading ? 'not-allowed' : 'pointer',
               whiteSpace: 'nowrap',
               flexShrink: 0,
-              opacity: loading ? 0.6 : 1,
-            }}
-            onMouseOver={e => {
-              if (!loading) {
-                e.target.style.background = '#dbeafe'
-                e.target.style.borderColor = '#3b82f6'
-              }
-            }}
-            onMouseOut={e => {
-              e.target.style.background = '#f0f7ff'
-              e.target.style.borderColor = '#bfdbfe'
+              transition: 'all 0.2s',
+              opacity: loading ? 0.5 : 1,
+              display: 'flex', alignItems: 'center', gap: 5,
             }}
           >
+            <ChevronRight size={10} />
             {q}
           </button>
         ))}
@@ -281,172 +451,180 @@ I fetch live fixtures with real betting odds every time you ask, combined with c
       {/* Messages */}
       <div style={{
         flex: 1, overflowY: 'auto',
-        padding: '24px 16px',
+        padding: '28px 20px',
         display: 'flex', flexDirection: 'column',
-        gap: 16, maxWidth: 960,
+        gap: 20, maxWidth: 900,
         width: '100%', margin: '0 auto',
       }}>
         {messages.map((msg, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            alignItems: 'flex-start',
-            gap: 10,
-          }}>
-            {msg.role === 'assistant' && (
-              <div style={{
-                width: 34, height: 34, borderRadius: '10px',
-                background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
-                display: 'flex', alignItems: 'center',
-                justifyContent: 'center', flexShrink: 0,
-                boxShadow: '0 2px 8px rgba(59,130,246,0.2)',
-              }}>
-                <Trophy size={16} color="#fff" />
-              </div>
-            )}
-            <div
-              style={{
-                maxWidth: msg.role === 'assistant' ? '90%' : '75%',
-                background: msg.role === 'user'
-                  ? 'linear-gradient(135deg, #1d4ed8, #3b82f6)'
-                  : '#ffffff',
-                color: msg.role === 'user' ? '#ffffff' : '#1e293b',
-                borderRadius: msg.role === 'user'
-                  ? '18px 18px 4px 18px'
-                  : '4px 18px 18px 18px',
-                padding: '14px 18px',
-                fontSize: 14,
-                lineHeight: 1.7,
-                border: msg.role === 'assistant'
-                  ? '1px solid #e2e8f0' : 'none',
-                boxShadow: msg.role === 'assistant'
-                  ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
-                overflowX: 'auto',
-                minHeight: msg.role === 'assistant' && msg.content === '' ? '40px' : 'auto',
-              }}
-              dangerouslySetInnerHTML={{
-                __html: msg.content || (loading && i === messages.length - 1
-                  ? '<span style="color:#94a3b8">Analysing...</span>'
-                  : '')
-              }}
-            />
-          </div>
+          <MessageBubble
+            key={i}
+            msg={msg}
+            isLast={i === messages.length - 1}
+            loading={loading}
+          />
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Image Preview */}
-      {uploadedImage && (
+      {/* Image Previews */}
+      {images.length > 0 && (
         <div style={{
-          padding: '8px 24px',
+          padding: '10px 28px',
           background: '#ffffff',
-          borderTop: '1px solid #e2e8f0',
-          maxWidth: 960, width: '100%', margin: '0 auto',
+          borderTop: '1px solid #e8edf5',
+          maxWidth: 900, width: '100%', margin: '0 auto',
+          display: 'flex', gap: 8, flexWrap: 'wrap',
         }}>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
-            background: '#f0f7ff', border: '1px solid #bfdbfe',
-            borderRadius: 10, padding: '6px 10px',
-          }}>
-            <img
-              src={uploadedImage}
-              alt="preview"
-              style={{ height: 40, width: 40, objectFit: 'cover', borderRadius: 6 }}
-            />
-            <span style={{ fontSize: 12, color: '#1d4ed8' }}>Image ready</span>
-            <button onClick={removeImage} style={{
-              background: 'none', border: 'none',
-              cursor: 'pointer', color: '#94a3b8',
-              display: 'flex', alignItems: 'center',
+          {images.map((img, idx) => (
+            <div key={idx} style={{
+              position: 'relative',
+              border: '1px solid #bfdbfe',
+              borderRadius: 8, overflow: 'hidden',
+              background: '#f0f7ff',
             }}>
-              <X size={14} />
-            </button>
+              <img
+                src={img.preview}
+                alt="upload"
+                style={{ height: 56, width: 56, objectFit: 'cover', display: 'block' }}
+              />
+              <button
+                onClick={() => removeImage(idx)}
+                style={{
+                  position: 'absolute', top: 2, right: 2,
+                  background: 'rgba(0,0,0,0.5)', border: 'none',
+                  borderRadius: '50%', width: 16, height: 16,
+                  cursor: 'pointer', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: 0,
+                }}
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+          <div style={{
+            fontSize: 12, color: '#64748b',
+            display: 'flex', alignItems: 'center',
+            paddingLeft: 4,
+          }}>
+            {images.length} image{images.length > 1 ? 's' : ''} ready
           </div>
         </div>
       )}
 
-      {/* Input */}
+      {/* Input Area */}
       <div style={{
-        borderTop: '1px solid #e2e8f0',
-        padding: '16px 24px',
+        borderTop: '1px solid #e8edf5',
+        padding: '16px 28px 20px',
         background: '#ffffff',
-        boxShadow: '0 -1px 8px rgba(0,0,0,0.04)',
+        boxShadow: '0 -4px 20px rgba(0,0,0,0.04)',
       }}>
         <div style={{
-          maxWidth: 960, margin: '0 auto',
-          display: 'flex', gap: 12,
-          alignItems: 'flex-end',
-        }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            style={{ display: 'none' }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={loading}
-            style={{
-              background: uploadedImage ? '#dbeafe' : '#f8faff',
-              border: `1px solid ${uploadedImage ? '#3b82f6' : '#e2e8f0'}`,
-              borderRadius: 12, padding: '12px',
-              cursor: 'pointer',
-              color: uploadedImage ? '#1d4ed8' : '#94a3b8',
-              display: 'flex', alignItems: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <Image size={20} />
-          </button>
-
+          maxWidth: 900, margin: '0 auto',
+          background: '#f8faff',
+          border: '1.5px solid #e2e8f0',
+          borderRadius: 16,
+          overflow: 'hidden',
+          transition: 'border-color 0.2s',
+        }}
+          onFocusCapture={e => e.currentTarget.style.borderColor = '#3b82f6'}
+          onBlurCapture={e => e.currentTarget.style.borderColor = '#e2e8f0'}
+        >
           <textarea
+            ref={textareaRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => { setInput(e.target.value); autoResize() }}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
                 sendMessage()
               }
             }}
-            placeholder="Ask anything... e.g. 'Best bets this weekend?' or upload a screenshot"
-            className="input-field"
-            rows={2}
-            style={{ flex: 1, resize: 'none', borderRadius: 12, lineHeight: 1.5 }}
-          />
-          <button
-            onClick={() => sendMessage()}
-            disabled={loading || (!input.trim() && !imageBase64)}
-            className="btn-primary"
+            placeholder="Ask anything... e.g. 'Best bets this weekend across all leagues?'"
+            rows={1}
             style={{
-              padding: '12px 20px', borderRadius: 12,
-              opacity: loading || (!input.trim() && !imageBase64) ? 0.5 : 1,
-              display: 'flex', alignItems: 'center', gap: 8,
-              flexShrink: 0,
+              width: '100%', border: 'none', outline: 'none',
+              background: 'transparent',
+              padding: '14px 16px 0',
+              fontSize: 14, lineHeight: 1.6,
+              color: '#1e293b', resize: 'none',
+              fontFamily: 'inherit',
+              minHeight: 44,
             }}
-          >
-            <Send size={18} />
-          </button>
+          />
+
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px 10px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageUpload}
+                style={{ display: 'none' }}
+              />
+              <button
+                className="upload-btn"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+                title="Upload images"
+                style={{
+                  background: 'none',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8, padding: '5px 10px',
+                  cursor: 'pointer', color: '#94a3b8',
+                  display: 'flex', alignItems: 'center',
+                  gap: 5, fontSize: 12, fontWeight: 500,
+                  transition: 'all 0.2s',
+                }}
+              >
+                <ImagePlus size={14} />
+                {images.length > 0 ? `${images.length} image${images.length > 1 ? 's' : ''}` : 'Add images'}
+              </button>
+              <span style={{ fontSize: 11, color: '#cbd5e1' }}>
+                Shift+Enter for new line
+              </span>
+            </div>
+
+            <button
+              className="send-btn"
+              onClick={() => sendMessage()}
+              disabled={loading || (!input.trim() && images.length === 0)}
+              style={{
+                background: loading || (!input.trim() && images.length === 0)
+                  ? '#e2e8f0'
+                  : 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
+                border: 'none',
+                borderRadius: 10,
+                padding: '8px 18px',
+                cursor: loading || (!input.trim() && images.length === 0) ? 'not-allowed' : 'pointer',
+                color: loading || (!input.trim() && images.length === 0) ? '#94a3b8' : '#fff',
+                display: 'flex', alignItems: 'center', gap: 7,
+                fontSize: 13, fontWeight: 600,
+                transition: 'all 0.2s',
+                boxShadow: loading || (!input.trim() && images.length === 0)
+                  ? 'none'
+                  : '0 4px 12px rgba(59,130,246,0.3)',
+              }}
+            >
+              <Send size={14} />
+              {loading ? 'Analysing...' : 'Send'}
+            </button>
+          </div>
         </div>
+
         <div style={{
-          textAlign: 'center', color: '#94a3b8',
-          fontSize: 11, marginTop: 10,
+          textAlign: 'center', color: '#cbd5e1',
+          fontSize: 11, marginTop: 10, fontWeight: 500,
         }}>
-          FootballIQ • Live odds + standings • Please gamble responsibly 🎗️
+          FootballIQ • Live odds via The Odds API • Please gamble responsibly
         </div>
       </div>
-
-      <style>{`
-        @keyframes bounce {
-          0%, 60%, 100% { transform: translateY(0); }
-          30% { transform: translateY(-8px); }
-        }
-        table { margin: 12px 0; }
-        @media (max-width: 600px) {
-          table { font-size: 11px; }
-          thead th, tbody td { padding: 8px 10px; }
-        }
-      `}</style>
     </div>
   )
 }
