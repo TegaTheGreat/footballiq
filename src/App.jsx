@@ -10,20 +10,17 @@ const QUICK_QUESTIONS = [
   "Which teams are most likely to score first?",
   "Best both teams to score picks this weekend?",
   "Which underdogs could cause upsets this weekend?",
-  "Show me my prediction history and win rate",
-  "What markets am I winning most on?",
 ]
 
 export default function App() {
   const [messages, setMessages] = useState([{
     role: 'assistant',
     content: `👋 Welcome to <strong>FootballIQ</strong> — your AI football prediction engine!<br/><br/>
-I remember everything in our conversation so you can build on previous predictions naturally — just like talking to a real analyst.<br/><br/>
-<strong>Ask me anything or upload an image below! 👇</strong>`
+I fetch live fixtures with real betting odds every time you ask, combined with current league standings and form.<br/><br/>
+<strong>Ask me anything or upload a screenshot below! 👇</strong>`
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [seasonStats, setSeasonStats] = useState(null)
   const [uploadedImage, setUploadedImage] = useState(null)
   const [imageBase64, setImageBase64] = useState(null)
   const [imageType, setImageType] = useState(null)
@@ -56,14 +53,12 @@ I remember everything in our conversation so you can build on previous predictio
 
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
-    if ((!text && !imageBase64) || loading) return
+    if (!text && !imageBase64 || loading) return
 
     setInput('')
     setLoading(true)
 
     const userContent = text || 'Analyze this image and give me predictions'
-
-    // Add user message to UI
     const userMessage = {
       role: 'user',
       content: uploadedImage
@@ -75,27 +70,25 @@ I remember everything in our conversation so you can build on previous predictio
     const sentImageType = imageType
     removeImage()
 
-    setMessages(prev => [...prev, userMessage])
+    const updatedMessages = [...messages, userMessage]
+    setMessages(updatedMessages)
+
+    // Add empty assistant message for streaming
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
     try {
-      // Build clean conversation history to send
-      const conversationHistory = [...messages, userMessage]
-        .filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => ({
-          role: m.role,
-          // Strip HTML tags for the API
-          content: typeof m.content === 'string'
-            ? m.content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
-            : m.content
-        }))
-        .filter(m => m.content.length > 0)
-
       const response = await fetch('/api/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: userContent,
-          messages: conversationHistory,
+          messages: updatedMessages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .slice(-6)
+            .map(m => ({
+              role: m.role,
+              content: m.content.replace(/<[^>]*>/g, '').slice(0, 800)
+            })),
           image: sentImage ? {
             base64: sentImage,
             type: sentImageType,
@@ -104,40 +97,83 @@ I remember everything in our conversation so you can build on previous predictio
       })
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({}))
-        throw new Error(errData.error || `Server error: ${response.status}`)
+        throw new Error(`Server error: ${response.status}`)
       }
 
-      const data = await response.json()
+      const contentType = response.headers.get('content-type')
 
-      if (data.seasonStats) {
-        setSeasonStats(data.seasonStats)
-      }
+      if (contentType?.includes('text/event-stream')) {
+        // Handle streaming response
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let fullText = ''
 
-      if (data.content && data.content[0]) {
-        const rawText = data.content[0].text
-        const formatted = rawText
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\*(.*?)\*/g, '<em>$1</em>')
-          .replace(/###\s(.*?)\n/g, '<h3 style="margin:12px 0 6px;color:#1d4ed8;font-size:15px">$1</h3>')
-          .replace(/##\s(.*?)\n/g, '<h2 style="margin:14px 0 8px;color:#1d4ed8;font-size:16px">$1</h2>')
-          .replace(/\n/g, '<br/>')
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
 
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: formatted
-        }])
+          const chunk = decoder.decode(value)
+          const lines = chunk.split('\n').filter(l => l.trim())
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6)
+              if (data === '[DONE]') continue
+              try {
+                const parsed = JSON.parse(data)
+                if (parsed.text) {
+                  fullText += parsed.text
+                  const formatted = formatMessage(fullText)
+                  setMessages(prev => {
+                    const updated = [...prev]
+                    updated[updated.length - 1] = {
+                      role: 'assistant',
+                      content: formatted
+                    }
+                    return updated
+                  })
+                }
+              } catch (e) {}
+            }
+          }
+        }
       } else {
-        throw new Error(data.error?.message || 'No response received')
+        // Handle regular JSON response
+        const data = await response.json()
+        if (data.content && data.content[0]) {
+          setMessages(prev => {
+            const updated = [...prev]
+            updated[updated.length - 1] = {
+              role: 'assistant',
+              content: formatMessage(data.content[0].text)
+            }
+            return updated
+          })
+        } else {
+          throw new Error(data.error || 'No response')
+        }
       }
     } catch (err) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: `⚠️ Something went wrong: ${err.message}. Please try again.`
-      }])
+      setMessages(prev => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: 'assistant',
+          content: `⚠️ Something went wrong: ${err.message}. Please try again.`
+        }
+        return updated
+      })
     } finally {
       setLoading(false)
     }
+  }
+
+  const formatMessage = (text) => {
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/###\s(.*?)\n/g, '<h3 style="margin:12px 0 6px;color:#1d4ed8;font-size:15px">$1</h3>')
+      .replace(/##\s(.*?)\n/g, '<h2 style="margin:14px 0 8px;color:#1d4ed8;font-size:16px">$1</h2>')
+      .replace(/\n/g, '<br/>')
   }
 
   return (
@@ -181,31 +217,13 @@ I remember everything in our conversation so you can build on previous predictio
             </div>
           </div>
         </div>
-
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {seasonStats && seasonStats.total > 0 && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              background: '#f0f7ff', border: '1px solid #bfdbfe',
-              borderRadius: 10, padding: '6px 12px',
-            }}>
-              <TrendingUp size={14} color="#1d4ed8" />
-              <span style={{ fontSize: 12, color: '#1d4ed8', fontWeight: 600 }}>
-                {seasonStats.winRate}% Win Rate
-              </span>
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                {seasonStats.won}W {seasonStats.lost}L {seasonStats.pending}P
-              </span>
-            </div>
-          )}
-          <span className="badge badge-green">✅ Live Data</span>
+          <span className="badge badge-green">✅ Live Odds + Standings</span>
           <button
-            onClick={() => {
-              setMessages([{
-                role: 'assistant',
-                content: `👋 New conversation started! What would you like to analyze? 👇`
-              }])
-            }}
+            onClick={() => setMessages([{
+              role: 'assistant',
+              content: `👋 New chat! Ask me anything about upcoming matches. 👇`
+            }])}
             style={{
               background: '#f8faff',
               border: '1px solid #e2e8f0',
@@ -242,7 +260,6 @@ I remember everything in our conversation so you can build on previous predictio
               cursor: loading ? 'not-allowed' : 'pointer',
               whiteSpace: 'nowrap',
               flexShrink: 0,
-              transition: 'all 0.2s',
               opacity: loading ? 0.6 : 1,
             }}
             onMouseOver={e => {
@@ -305,46 +322,16 @@ I remember everything in our conversation so you can build on previous predictio
                 boxShadow: msg.role === 'assistant'
                   ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
                 overflowX: 'auto',
+                minHeight: msg.role === 'assistant' && msg.content === '' ? '40px' : 'auto',
               }}
-              dangerouslySetInnerHTML={{ __html: msg.content }}
+              dangerouslySetInnerHTML={{
+                __html: msg.content || (loading && i === messages.length - 1
+                  ? '<span style="color:#94a3b8">Analysing...</span>'
+                  : '')
+              }}
             />
           </div>
         ))}
-
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: '10px',
-              background: 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
-              display: 'flex', alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 8px rgba(59,130,246,0.2)',
-            }}>
-              <Trophy size={16} color="#fff" />
-            </div>
-            <div style={{
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: '4px 18px 18px 18px',
-              padding: '14px 20px',
-              display: 'flex', gap: 6,
-              alignItems: 'center',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            }}>
-              {[0, 1, 2].map(j => (
-                <div key={j} style={{
-                  width: 8, height: 8,
-                  borderRadius: '50%',
-                  background: '#3b82f6',
-                  animation: `bounce 1s ease infinite ${j * 0.2}s`,
-                }} />
-              ))}
-              <span style={{ marginLeft: 8, color: '#94a3b8', fontSize: 13 }}>
-                Thinking...
-              </span>
-            </div>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -354,6 +341,7 @@ I remember everything in our conversation so you can build on previous predictio
           padding: '8px 24px',
           background: '#ffffff',
           borderTop: '1px solid #e2e8f0',
+          maxWidth: 960, width: '100%', margin: '0 auto',
         }}>
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -362,7 +350,7 @@ I remember everything in our conversation so you can build on previous predictio
           }}>
             <img
               src={uploadedImage}
-              alt="upload"
+              alt="preview"
               style={{ height: 40, width: 40, objectFit: 'cover', borderRadius: 6 }}
             />
             <span style={{ fontSize: 12, color: '#1d4ed8' }}>Image ready</span>
@@ -406,9 +394,8 @@ I remember everything in our conversation so you can build on previous predictio
               cursor: 'pointer',
               color: uploadedImage ? '#1d4ed8' : '#94a3b8',
               display: 'flex', alignItems: 'center',
-              flexShrink: 0, transition: 'all 0.2s',
+              flexShrink: 0,
             }}
-            title="Upload image"
           >
             <Image size={20} />
           </button>
@@ -422,24 +409,17 @@ I remember everything in our conversation so you can build on previous predictio
                 sendMessage()
               }
             }}
-            placeholder={uploadedImage
-              ? "Add context or just hit send..."
-              : "Ask anything... build on previous answers naturally"
-            }
+            placeholder="Ask anything... e.g. 'Best bets this weekend?' or upload a screenshot"
             className="input-field"
             rows={2}
-            style={{
-              flex: 1, resize: 'none',
-              borderRadius: 12, lineHeight: 1.5,
-            }}
+            style={{ flex: 1, resize: 'none', borderRadius: 12, lineHeight: 1.5 }}
           />
           <button
             onClick={() => sendMessage()}
             disabled={loading || (!input.trim() && !imageBase64)}
             className="btn-primary"
             style={{
-              padding: '12px 20px',
-              borderRadius: 12,
+              padding: '12px 20px', borderRadius: 12,
               opacity: loading || (!input.trim() && !imageBase64) ? 0.5 : 1,
               display: 'flex', alignItems: 'center', gap: 8,
               flexShrink: 0,
@@ -452,7 +432,7 @@ I remember everything in our conversation so you can build on previous predictio
           textAlign: 'center', color: '#94a3b8',
           fontSize: 11, marginTop: 10,
         }}>
-          FootballIQ • Full conversation memory • Upload images • Predictions tracked • Please gamble responsibly 🎗️
+          FootballIQ • Live odds + standings • Please gamble responsibly 🎗️
         </div>
       </div>
 
