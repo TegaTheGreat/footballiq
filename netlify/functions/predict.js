@@ -16,28 +16,32 @@ export default async (req) => {
 
     const bodyText = await req.text()
     const body = JSON.parse(bodyText)
-    const { messages, question, image } = body
+    const { messages, question, image, images } = body
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
+    const season = 2025
 
     // ============================================
     // STEP 1: FETCH LIVE FIXTURES FROM ODDS API
     // ============================================
     const sportsToFetch = [
-      'soccer_epl',
-      'soccer_germany_bundesliga',
-      'soccer_italy_serie_a',
-      'soccer_spain_la_liga',
-      'soccer_france_ligue_one',
-      'soccer_netherlands_eredivisie',
-      'soccer_belgium_first_div',
-      'soccer_portugal_primeira_liga',
-      'soccer_scotland_premiership',
-      'soccer_uefa_champs_league',
-      'soccer_uefa_europa_league',
-      'soccer_brazil_campeonato',
-      'soccer_argentina_primera_division',
+      { key: 'soccer_epl', name: 'Premier League' },
+      { key: 'soccer_epl_cup', name: 'FA Cup' },
+      { key: 'soccer_germany_bundesliga', name: 'Bundesliga' },
+      { key: 'soccer_italy_serie_a', name: 'Serie A' },
+      { key: 'soccer_spain_la_liga', name: 'La Liga' },
+      { key: 'soccer_france_ligue_one', name: 'Ligue 1' },
+      { key: 'soccer_netherlands_eredivisie', name: 'Eredivisie' },
+      { key: 'soccer_belgium_first_div', name: 'Belgian Pro League' },
+      { key: 'soccer_portugal_primeira_liga', name: 'Primeira Liga' },
+      { key: 'soccer_scotland_premiership', name: 'Scottish Premiership' },
+      { key: 'soccer_uefa_champs_league', name: 'Champions League' },
+      { key: 'soccer_uefa_europa_league', name: 'Europa League' },
+      { key: 'soccer_uefa_europa_conference_league', name: 'Conference League' },
+      { key: 'soccer_brazil_campeonato', name: 'Brazilian Serie A' },
+      { key: 'soccer_argentina_primera_division', name: 'Argentine Primera' },
+      { key: 'soccer_saudi_professional_league', name: 'Saudi Pro League' },
     ]
 
     let fixturesContext = ''
@@ -47,7 +51,7 @@ export default async (req) => {
       try {
         const fixtureRequests = sportsToFetch.map(sport =>
           fetch(
-            `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${ODDS_API_KEY}&regions=uk&markets=h2h&dateFormat=iso&oddsFormat=decimal`
+            `https://api.the-odds-api.com/v4/sports/${sport.key}/odds/?apiKey=${ODDS_API_KEY}&regions=uk&markets=h2h&dateFormat=iso&oddsFormat=decimal`
           )
           .then(r => r.json())
           .catch(() => [])
@@ -57,10 +61,7 @@ export default async (req) => {
 
         results.forEach((fixtures, idx) => {
           if (!Array.isArray(fixtures) || fixtures.length === 0) return
-          const sportName = sportsToFetch[idx]
-            .replace('soccer_', '')
-            .replace(/_/g, ' ')
-            .toUpperCase()
+          const sportName = sportsToFetch[idx].name
           fixturesContext += `\n=== ${sportName} ===\n`
 
           fixtures.forEach(fixture => {
@@ -84,7 +85,12 @@ export default async (req) => {
             }
 
             fixturesContext += `${date}: ${fixture.home_team} vs ${fixture.away_team}`
-            if (homeOdds) fixturesContext += ` | Home:${homeOdds} Draw:${drawOdds || 'N/A'} Away:${awayOdds}`
+            if (homeOdds) {
+              fixturesContext += ` | Home:${homeOdds} Draw:${drawOdds || 'N/A'} Away:${awayOdds}`
+              // Flag value indicators
+              if (homeOdds <= 1.4) fixturesContext += ` [STRONG FAVOURITE]`
+              if (homeOdds >= 3.0 && awayOdds >= 3.0) fixturesContext += ` [OPEN MATCH]`
+            }
             fixturesContext += '\n'
           })
         })
@@ -97,11 +103,10 @@ export default async (req) => {
     // STEP 2: FETCH STANDINGS FROM API-SPORTS
     // ============================================
     let standingsContext = ''
-    const season = 2025
 
     if (APISPORTS_KEY) {
       try {
-        const leagueIds = [39, 78, 135, 140, 61, 88, 144, 94, 179]
+        const leagueIds = [39, 78, 135, 140, 61, 88, 144, 94, 179, 307]
         const standingResults = await Promise.all(
           leagueIds.map(id =>
             fetch(
@@ -132,8 +137,12 @@ export default async (req) => {
                 goalsFor: team.all?.goals?.for,
                 goalsAgainst: team.all?.goals?.against,
                 form: team.form || '',
+                homeWon: team.home?.win,
+                homePlayed: team.home?.played,
                 homeGF: team.home?.goals?.for,
                 homeGA: team.home?.goals?.against,
+                awayWon: team.away?.win,
+                awayPlayed: team.away?.played,
                 awayGF: team.away?.goals?.for,
                 awayGA: team.away?.goals?.against,
               })
@@ -148,7 +157,7 @@ export default async (req) => {
             .sort((a, b) => a.position - b.position)
             .slice(0, 12)
             .forEach(t => {
-              standingsContext += `${t.position}. ${t.team} | ${t.points}pts | W${t.won} D${t.drawn} L${t.lost} | GF${t.goalsFor} GA${t.goalsAgainst} | Form:${t.form} | HomeGF${t.homeGF} HomeGA${t.homeGA} AwayGF${t.awayGF} AwayGA${t.awayGA}\n`
+              standingsContext += `${t.position}. ${t.team} | ${t.points}pts | W${t.won} D${t.drawn} L${t.lost} | GF${t.goalsFor} GA${t.goalsAgainst} | Form:${t.form} | HomeW:${t.homeWon}/${t.homePlayed} HomeGF:${t.homeGF} HomeGA:${t.homeGA} | AwayW:${t.awayWon}/${t.awayPlayed} AwayGF:${t.awayGF} AwayGA:${t.awayGA}\n`
             })
         })
       } catch (e) {
@@ -159,81 +168,88 @@ export default async (req) => {
     // ============================================
     // STEP 3: BUILD SYSTEM PROMPT
     // ============================================
-    const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor. You are warm, confident and conversational — like a knowledgeable friend who happens to be a professional analyst.
+    const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You are warm, intelligent and conversational — like a brilliant friend who happens to be a professional analyst.
 
 TODAY: ${today}
 
 ${totalFixtures > 0
   ? `LIVE FIXTURES WITH REAL BETTING ODDS (${totalFixtures} matches loaded):
 ${fixturesContext}`
-  : 'No live fixture data available right now — use your comprehensive 2025/26 season knowledge to identify upcoming matches and provide predictions.'}
+  : `No live fixture data right now — use your comprehensive 2025/26 season knowledge confidently.`}
 
 ${standingsContext}
 
-HOW TO RESPOND:
-- Talk like a real analyst not a robot processing a query
-- Break long responses into clear sections with headers
-- Think out loud — explain WHY you are picking something
-- When giving many predictions work through them league by league
-- Reference the odds — if home odds are 1.4 say "the bookmakers strongly back them here at 1.4"
-- Ask follow up questions when relevant
-- Reference previous messages naturally
-- Show personality — football is exciting, reflect that
-- When highly confident say so — "This is a near certainty for me"
-- When something is risky acknowledge it honestly
-- Never cut off mid thought — always complete your analysis
+HOW YOU COMMUNICATE:
+- You are conversational and warm — not a robot outputting data
+- You think out loud and explain your reasoning
+- You reference the actual odds in your analysis — "bookmakers have them at 1.65 which I think is fair" or "at 3.2 that's actually value"
+- You remember everything said earlier in this conversation and build on it naturally
+- For long responses you work through things section by section — don't dump everything at once
+- You show genuine enthusiasm for the game
+- You are honest when a pick is risky
+- You never cut off mid-thought — always complete your analysis fully
 
-USING THE DATA:
-- Cross reference odds with form and standings for best predictions
-- Lower odds = bookmakers agree with you = higher confidence
-- Flag value bets where your analysis disagrees with the odds
-- Use home/away goal records to predict scoring patterns
-- Use form (W/D/L sequence) to identify momentum
-
-FORMATTING:
-- Use HTML tables for prediction lists:
+FORMATTING RULES — FOLLOW EXACTLY:
+- Use ## for main section headers
+- Use ### for sub-headers
+- Use **bold** for key stats and picks
+- Use bullet points with - for lists
+- For prediction tables use this exact HTML:
 <table>
 <thead><tr><th>Match</th><th>League</th><th>Pick</th><th>Market</th><th>Odds</th><th>Confidence</th><th>Risk</th></tr></thead>
 <tbody>
 <tr><td>Liverpool vs Tottenham</td><td>Premier League</td><td>Liverpool Win</td><td>Match Result</td><td>1.65</td><td>82%</td><td>Low</td></tr>
 </tbody>
 </table>
-- Use <strong> for key stats and insights
-- Use ## for section headers
-- Make responses clean enough to screenshot
+- Separate sections clearly with a blank line
+- Do NOT use --- as separators (they show as literal text)
+- Keep paragraphs tight — max 3 sentences per paragraph
+- When building accumulators show the combined odds calculation
 
-Always end with a brief responsible gambling reminder.`
+USING THE DATA:
+- Cross reference odds with form and standings
+- Lower odds = market favourite = use as supporting evidence
+- Flag genuine value where your analysis disagrees with the odds
+- Use home/away goal records to predict scoring patterns
+- Use form sequence to identify momentum
+
+Always end with a brief responsible gambling note.`
 
     // ============================================
-    // STEP 4: BUILD MESSAGES
+    // STEP 4: BUILD MESSAGES WITH IMAGE SUPPORT
     // ============================================
     let userContent
-    if (image) {
+
+    const imageList = images || (image ? [image] : [])
+
+    if (imageList.length > 0) {
+      const imageBlocks = imageList.map(img => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.type,
+          data: img.base64,
+        }
+      }))
       userContent = [
-        {
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: image.type,
-            data: image.base64,
-          }
-        },
+        ...imageBlocks,
         {
           type: 'text',
-          text: question || 'Analyze this image and give me predictions'
+          text: question || 'Analyze these images and give me full predictions and insights'
         }
       ]
     } else {
       userContent = question || 'Give me the best bets this weekend'
     }
 
+    // Build conversation history
     const conversationHistory = (messages || [])
       .filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-6)
+      .slice(-8)
       .map(m => ({
         role: m.role,
         content: typeof m.content === 'string'
-          ? m.content.replace(/<[^>]*>/g, '').slice(0, 800)
+          ? m.content.replace(/<[^>]*>/g, '').slice(0, 1000)
           : m.content
       }))
 
@@ -298,7 +314,9 @@ Always end with a brief responsible gambling reminder.`
                 const parsed = JSON.parse(data)
                 if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
                   await writer.write(
-                    encoder.encode(`data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`)
+                    encoder.encode(
+                      `data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`
+                    )
                   )
                 }
               } catch (e) {}
