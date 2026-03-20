@@ -46,7 +46,7 @@ The user is asking: "${question}"
 
 STEP 1 — THINK before you search. Identify:
 - What specific teams, leagues or competitions are being asked about?
-- If the request is general like "best bets this weekend" — automatically identify the biggest matches happening this weekend across Premier League, Champions League, Europa League, Bundesliga, Serie A and La Liga
+- If the request is general like "best bets this weekend" — automatically identify the biggest matches happening this weekend across Premier League, Championship, Champions League, Europa League, Bundesliga, Serie A, La Liga, Ligue 1, Eredivisie, Scottish Premiership, Belgian Pro League, Primeira Liga, Saudi Pro League and Brazilian Serie A
 
 STEP 2 — SEARCH for each identified match or team:
 - "[Team A] vs [Team B] preview ${today}"
@@ -100,8 +100,10 @@ Search multiple times. Never return empty.` }]
       if (!ODDS_API_KEY) return { context: '', total: 0 }
       const sports = [
         { key: 'soccer_epl', name: 'Premier League' },
+        { key: 'soccer_epl_cup', name: 'FA Cup' },
         { key: 'soccer_uefa_champs_league', name: 'Champions League' },
         { key: 'soccer_uefa_europa_league', name: 'Europa League' },
+        { key: 'soccer_uefa_europa_conference_league', name: 'Conference League' },
         { key: 'soccer_spain_la_liga', name: 'La Liga' },
         { key: 'soccer_germany_bundesliga', name: 'Bundesliga' },
         { key: 'soccer_italy_serie_a', name: 'Serie A' },
@@ -111,6 +113,8 @@ Search multiple times. Never return empty.` }]
         { key: 'soccer_portugal_primeira_liga', name: 'Primeira Liga' },
         { key: 'soccer_scotland_premiership', name: 'Scottish Premiership' },
         { key: 'soccer_saudi_professional_league', name: 'Saudi Pro League' },
+        { key: 'soccer_brazil_campeonato', name: 'Brazilian Serie A' },
+        { key: 'soccer_argentina_primera_division', name: 'Argentine Primera' },
       ]
       try {
         const results = await Promise.all(
@@ -160,7 +164,7 @@ Search multiple times. Never return empty.` }]
     const fetchStandings = async () => {
       if (!APISPORTS_KEY) return ''
       try {
-        const leagues = [39, 140, 78, 135, 61, 2]
+        const leagues = [39, 140, 78, 135, 61, 2, 3, 88, 94, 144, 179]
         const results = await Promise.all(
           leagues.map(id =>
             fetch(`https://v3.football.api-sports.io/standings?league=${id}&season=${season}`, {
@@ -201,6 +205,14 @@ Search multiple times. Never return empty.` }]
     // ============================================
     const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You think and communicate like a brilliant analyst — warm, sharp, and data-driven.
 
+CRITICAL RULE: You have a limited response window. When asked for many matches:
+- Maximum 5 lines per match
+- Bullet points only per match — no long paragraphs
+- Cover ALL requested matches before doing summary table
+- If asked for 25 matches give brief analysis for all 25 then summarise
+- Never go deep on one match at the expense of missing others
+- Prioritise breadth over depth when many matches are requested
+
 TODAY: ${today}
 
 === LIVE DATA FROM GEMINI GOOGLE SEARCH ===
@@ -235,31 +247,24 @@ STEP 4 — ONLY MAKE INFORMED PREDICTIONS
 - Limited data = lower confidence, say so
 - No data = flag as insufficient, do not guess
 
-STEP 5 — STRUCTURE YOUR RESPONSE:
-
-## [Competition] Analysis
+STEP 5 — STRUCTURE EACH MATCH LIKE THIS:
 
 ### [Home Team] vs [Away Team]
-**Date/Time:** [from data]
-**Form:** [Home Team last 5] | [Away Team last 5]
-**Head to Head:** [recent meetings]
-**Key Absences:** [injuries from data]
-**Context:** [tactical or motivation notes]
-**Odds:** Home [x.xx] | Draw [x.xx] | Away [x.xx]
-**Analysis:** [your reasoning from actual data]
-**Prediction:** [pick] — [confidence]% confidence
-**Best Bet:** [specific market with reasoning]
+**Odds:** Home [x] | Draw [x] | Away [x] | **Form:** [Home last 5] | [Away last 5]
+**Key Absences:** [injuries] | **H2H:** [last 2 results]
+**Analysis:** [2-3 sentences max]
+**Prediction:** [pick] — [confidence]% | **Best Bet:** [market]
 
-After all matches:
+After ALL matches:
 
 ## Summary Table
 [HTML predictions table]
 
 ## Best Accumulator
-[3-4 picks with combined odds calculation]
+[3-4 picks with combined odds]
 
 ## Matches to Avoid
-[too unpredictable or insufficient data]
+[2-3 matches max with brief reason]
 
 === COMMUNICATION ===
 - Think out loud — show reasoning from actual data
@@ -324,27 +329,7 @@ After all matches:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-max_tokens: 8000,
-```
-
-**Fix 2 — Add this at the very top of the system prompt:**
-
-Find:
-```
-You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You think and communicate like a brilliant analyst — warm, sharp, and data-driven.
-```
-
-Replace with:
-```
-You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You think and communicate like a brilliant analyst — warm, sharp, and data-driven.
-
-CRITICAL RULE: You have a limited response window. When asked for many matches:
-- Maximum 5 lines per match
-- No long paragraphs — bullet points only per match
-- Cover ALL requested matches before doing summary table
-- If asked for 25 matches, give brief analysis for all 25 then summarise
-- Never go deep on one match at the expense of missing others
-- Prioritise breadth over depth when many matches are requested
+        max_tokens: 8000,
         stream: true,
         system: systemPrompt,
         messages: allMessages,
