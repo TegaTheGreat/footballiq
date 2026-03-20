@@ -59,32 +59,29 @@ export default async function handler(req, res) {
           controller.abort()
         }, GEMINI_TIMEOUT)
 
-        const scoutPrompt = `You are an elite sports researcher with live Google Search access. Today is ${today}.
+        const scoutPrompt = `You are a football data scout with Google Search. Today is ${today}.
 
-The user is asking: "${question}"
+User question: "${question}"
 
-STEP 1 â€” THINK before you search. Identify:
-- What specific teams, leagues or competitions are being asked about?
-- If the request is general like "best bets this weekend" â€” automatically identify the biggest matches happening this weekend across Premier League, Championship, Champions League, Europa League, Bundesliga, Serie A, La Liga, Ligue 1, Eredivisie, Scottish Premiership, Belgian Pro League, Primeira Liga, Saudi Pro League
+Search for ONLY these 4 things per match/team mentioned:
 
-STEP 2 â€” SEARCH for each identified match or team:
-- "[Team A] vs [Team B] preview ${today}"
-- "[Team A] recent form results March 2026"
-- "[Team B] recent form results March 2026"
-- "[Team A] injuries suspensions team news March 2026"
-- "[Competition] fixtures this week March 2026"
-- "[Competition] standings table March 2026"
+1. FORM â€” Last 5 match results with scores (e.g. W 2-1, L 0-3, D 1-1)
+2. STANDINGS â€” Current league position and points
+3. H2H â€” Last 3 head-to-head results between the teams
+4. TACTICAL â€” Manager approach, formation, playing style, motivation (e.g. fighting relegation, resting players for UCL)
 
-STEP 3 â€” RETURN a concise bulleted list of raw facts only. No intro, no outro:
+If the question is broad (e.g. "best bets this weekend"), identify the key fixtures across top leagues and cover each one.
 
-- [Match]: [date and time]
-- [Team] form: [last 5 results with scores]
-- [Team] key absence: [player name, reason]
-- [Team] vs [Team] H2H: [last 3 results with scores]
-- [League] top 6: [teams with points]
-- Breaking news: [any relevant injury or tactical news]
+DO NOT search for: injury news, transfer rumours, match previews, pundit opinions, or odds.
 
-Be fast and concise. Return only facts.`
+Return ONLY a bullet list of raw facts. No intro, no analysis, no outro. Example format:
+
+- Arsenal form: W 3-1, W 2-0, D 1-1, W 4-0, L 0-1
+- Arsenal: 2nd in PL, 68pts
+- Arsenal vs Chelsea H2H: Arsenal 2-1, Chelsea 1-0, Draw 2-2
+- Arsenal: Arteta plays 4-3-3, strong pressing, prioritising league title
+
+Be concise. Facts only.`
 
         // KEY CHANGE: streamGenerateContent instead of generateContent
         // &alt=sse tells Gemini to use Server-Sent Events format
