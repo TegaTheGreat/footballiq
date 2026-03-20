@@ -33,11 +33,14 @@ export default async function handler(req, res) {
         const timeout = setTimeout(() => controller.abort(), 25000)
 
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            signal: controller.signal,
-            headers: { 'Content-Type': 'application/json' },
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
+{
+  method: 'POST',
+  signal: controller.signal,
+  headers: {
+    'Content-Type': 'application/json',
+    'x-goog-api-key': GEMINI_API_KEY,
+  },
             body: JSON.stringify({
               contents: [{
                 parts: [{ text: `You are an elite sports researcher with live Google Search access. Today is ${today}.
