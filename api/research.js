@@ -1,8 +1,9 @@
 // =============================================================
 // STAGE 1 â€” /api/research.js
-// Fetches Gemini + Odds + Standings in parallel
-// Returns raw JSON to frontend â€” NO Claude, NO streaming
-// Should complete in 15-25 seconds
+// Fetches Gemini (STREAMING) + Odds + Standings in parallel
+// Returns raw JSON to frontend â€” NO Claude, NO streaming to client
+// Gemini uses streamGenerateContent so partial data is captured
+// even if the full response takes too long
 // =============================================================
 
 export default async function handler(req, res) {
@@ -32,9 +33,11 @@ export default async function handler(req, res) {
     }
 
     // ============================================
-    // GEMINI â€” Live data scout
-    // Increased timeout to 25s since this endpoint
-    // has its own budget separate from Claude
+    // GEMINI â€” Live data scout (STREAMING)
+    // Uses streamGenerateContent so partial data
+    // is captured even if the full response is slow.
+    // Timeout at 28s â€” if Gemini is still going,
+    // we keep whatever arrived so far.
     // ============================================
     const fetchGemini = async () => {
       if (!GEMINI_API_KEY) {
@@ -48,7 +51,13 @@ export default async function handler(req, res) {
 
       try {
         const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 25000) // 25s â€” more breathing room
+        let timedOut = false
+        const GEMINI_TIMEOUT = 28000 // 28s â€” generous but within Vercel's 30s budget
+
+        const timeout = setTimeout(() => {
+          timedOut = true
+          controller.abort()
+        }, GEMINI_TIMEOUT)
 
         const scoutPrompt = `You are an elite sports researcher with live Google Search access. Today is ${today}.
 
@@ -77,8 +86,10 @@ STEP 3 â€” RETURN a concise bulleted list of raw facts only. No intro, no o
 
 Be fast and concise. Return only facts.`
 
+        // KEY CHANGE: streamGenerateContent instead of generateContent
+        // &alt=sse tells Gemini to use Server-Sent Events format
         const response = await fetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse`,
           {
             method: 'POST',
             signal: controller.signal,
@@ -94,44 +105,101 @@ Be fast and concise. Return only facts.`
           }
         )
 
-        clearTimeout(timeout)
-
         if (!response.ok) {
+          clearTimeout(timeout)
           const errBody = await response.text()
           status.gemini.error = `HTTP ${response.status}: ${errBody.slice(0, 200)}`
           console.log('Gemini HTTP error:', response.status, errBody.slice(0, 300))
           return ''
         }
 
-        const data = await response.json()
+        // ========================================
+        // READ THE STREAM â€” accumulate text chunks
+        // If timeout fires mid-stream, we keep
+        // whatever we already captured
+        // ========================================
+        let collectedText = ''
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
 
-        // Check for API-level errors (wrong key, quota exceeded, etc.)
-        if (data.error) {
-          status.gemini.error = `API error: ${data.error.message || JSON.stringify(data.error).slice(0, 200)}`
-          console.log('Gemini API error:', data.error)
-          return ''
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            const chunk = decoder.decode(value, { stream: true })
+            const lines = chunk.split('\n')
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              const jsonStr = line.slice(6).trim()
+              if (!jsonStr || jsonStr === '[DONE]') continue
+
+              try {
+                const parsed = JSON.parse(jsonStr)
+
+                // Check for API errors in the stream
+                if (parsed.error) {
+                  status.gemini.error = `Stream error: ${parsed.error.message || JSON.stringify(parsed.error).slice(0, 200)}`
+                  console.log('Gemini stream error:', parsed.error)
+                  continue
+                }
+
+                // Extract text from each streamed chunk
+                const parts = parsed?.candidates?.[0]?.content?.parts
+                if (parts) {
+                  for (const part of parts) {
+                    if (part.text) {
+                      collectedText += part.text
+                    }
+                  }
+                }
+              } catch (parseErr) {
+                // Skip unparseable chunks â€” common with SSE
+              }
+            }
+          }
+        } catch (streamErr) {
+          // AbortError means our timeout fired â€” that's OK if we have partial data
+          if (streamErr.name !== 'AbortError') {
+            console.log('Gemini stream read error:', streamErr.message)
+          }
         }
 
-        const text = data?.candidates?.[0]?.content?.parts
-          ?.filter((p) => p.text)
-          ?.map((p) => p.text)
-          ?.join('\n')
+        clearTimeout(timeout)
 
-        if (text && text.length > 50) {
+        // ========================================
+        // EVALUATE WHAT WE GOT
+        // ========================================
+        if (collectedText.length > 50) {
           status.gemini.success = true
-          status.gemini.chars = text.length
-          console.log('Gemini success, chars:', text.length)
-          return text
+          status.gemini.chars = collectedText.length
+
+          if (timedOut) {
+            // We got useful data BUT the stream was cut short
+            status.gemini.error = `Partial data (timed out at ${GEMINI_TIMEOUT / 1000}s, captured ${collectedText.length} chars)`
+            console.log(`Gemini partial success: ${collectedText.length} chars before timeout`)
+          } else {
+            console.log(`Gemini full success: ${collectedText.length} chars`)
+          }
+
+          return collectedText
         }
 
-        // If we got here, response was empty or too short
-        status.gemini.error = `Empty response. Raw: ${JSON.stringify(data).slice(0, 300)}`
-        console.log('Gemini empty:', JSON.stringify(data).slice(0, 300))
+        // Nothing useful came through
+        if (timedOut) {
+          status.gemini.error = `Timed out after ${GEMINI_TIMEOUT / 1000}s with no usable data`
+          console.log('Gemini timed out with no data')
+        } else {
+          status.gemini.error = `Empty response (${collectedText.length} chars)`
+          console.log('Gemini empty response')
+        }
         return ''
       } catch (e) {
         if (e.name === 'AbortError') {
-          status.gemini.error = 'Timed out after 25s'
-          console.log('Gemini timed out after 25s')
+          // This catches the abort if it fires before the stream even starts
+          status.gemini.error = 'Timed out before stream started'
+          console.log('Gemini aborted before streaming')
         } else {
           status.gemini.error = e.message
           console.log('Gemini error:', e.message)
