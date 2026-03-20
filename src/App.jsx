@@ -12,7 +12,6 @@ const QUICK_QUESTIONS = [
   "Underdogs to watch this weekend",
 ]
 
-// Format Claude's markdown into clean HTML
 const formatMessage = (text) => {
   return text
     .replace(/^#{3}\s(.+)$/gm, '<h3>$1</h3>')
@@ -31,7 +30,7 @@ const formatMessage = (text) => {
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br/>')
-    .replace(/^(.+)$/, '<p>$1</p>')
+    .replace(/^(?!<[houpl])(.+)$/gm, '<p>$1</p>')
 }
 
 function CopyButton({ text }) {
@@ -54,7 +53,7 @@ function CopyButton({ text }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 4,
         background: 'none', border: '1px solid #e2e8f0',
-        borderRadius: 6, padding: '4px 8px',
+        borderRadius: 6, padding: '4px 10px',
         cursor: 'pointer', fontSize: 11, fontWeight: 500,
         color: copied ? '#16a34a' : '#94a3b8',
         transition: 'all 0.2s',
@@ -92,12 +91,19 @@ function MessageBubble({ msg, isLast, loading }) {
         </div>
       )}
 
-      <div style={{ maxWidth: isUser ? '72%' : '88%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{
+        maxWidth: isUser ? '72%' : '88%',
+        display: 'flex', flexDirection: 'column', gap: 6
+      }}>
         <div
           style={{
-            background: isUser ? 'linear-gradient(135deg, #1d4ed8, #2563eb)' : '#ffffff',
+            background: isUser
+              ? 'linear-gradient(135deg, #1d4ed8, #2563eb)'
+              : '#ffffff',
             color: isUser ? '#ffffff' : '#1e293b',
-            borderRadius: isUser ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+            borderRadius: isUser
+              ? '18px 18px 4px 18px'
+              : '4px 18px 18px 18px',
             padding: isUser ? '12px 16px' : '16px 20px',
             fontSize: 14,
             lineHeight: 1.75,
@@ -107,7 +113,10 @@ function MessageBubble({ msg, isLast, loading }) {
           }}
         >
           {isEmpty ? (
-            <div style={{ display: 'flex', gap: 5, alignItems: 'center', padding: '2px 0' }}>
+            <div style={{
+              display: 'flex', gap: 5,
+              alignItems: 'center', padding: '2px 0'
+            }}>
               {[0, 1, 2].map(j => (
                 <div key={j} style={{
                   width: 7, height: 7, borderRadius: '50%',
@@ -140,20 +149,22 @@ export default function App() {
     role: 'assistant',
     content: formatMessage(`## Welcome to FootballIQ ⚽
 
-I'm your personal football analyst — I fetch live fixtures with real betting odds, track current league standings, and give you data-driven predictions across all major leagues.
+I'm your personal football analyst — powered by Gemini live search and Claude AI analysis.
+
+Every time you ask me something I search the web for live fixtures, recent results, injuries and team news — then analyse it all to give you sharp, data-driven predictions.
 
 **Here's what I can do:**
 - Predict match outcomes with confidence ratings
-- Identify best bets by market (BTTS, Over/Under, Match Result)
+- Identify best bets by market — BTTS, Over/Under, Match Result
 - Build accumulators targeting specific odds
-- Analyse matches from screenshots you upload
+- Analyse screenshots you upload
 - Walk you through reasoning league by league
 
 Ask me anything or pick a quick question below.`)
   }])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [images, setImages] = useState([]) // Multiple images
+  const [images, setImages] = useState([])
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
   const textareaRef = useRef(null)
@@ -187,13 +198,14 @@ Ask me anything or pick a quick question below.`)
   const autoResize = () => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 160) + 'px'
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 160) + 'px'
     }
   }
 
   const sendMessage = async (messageText) => {
     const text = messageText || input.trim()
-    if (!text && images.length === 0 || loading) return
+    if ((!text && images.length === 0) || loading) return
 
     setInput('')
     setLoading(true)
@@ -201,7 +213,6 @@ Ask me anything or pick a quick question below.`)
 
     const userContent = text || 'Analyze these images and give me predictions'
 
-    // Build user message with image previews
     let displayContent = userContent
     if (images.length > 0) {
       const imgHtml = images.map(img =>
@@ -230,10 +241,12 @@ Ask me anything or pick a quick question below.`)
               role: m.role,
               content: m.content.replace(/<[^>]*>/g, '').slice(0, 800)
             })),
-          images: sentImages.length > 0 ? sentImages.map(img => ({
-            base64: img.base64,
-            type: img.type,
-          })) : null,
+          images: sentImages.length > 0
+            ? sentImages.map(img => ({
+                base64: img.base64,
+                type: img.type,
+              }))
+            : null,
         }),
       })
 
@@ -311,7 +324,6 @@ Ask me anything or pick a quick question below.`)
       flexDirection: 'column',
       fontFamily: "'DM Sans', 'Segoe UI', system-ui, sans-serif",
     }}>
-
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;800&family=DM+Serif+Display&display=swap');
 
@@ -340,22 +352,23 @@ Ask me anything or pick a quick question below.`)
         .message-content tbody tr:nth-child(even) { background: #fafbff; }
 
         .quick-btn:hover { background: #dbeafe !important; border-color: #3b82f6 !important; color: #1d4ed8 !important; }
-        .send-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .send-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
         .upload-btn:hover { border-color: #3b82f6 !important; color: #1d4ed8 !important; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
       `}</style>
 
       {/* Header */}
       <header style={{
         borderBottom: '1px solid #e8edf5',
         padding: '14px 28px',
-        display: 'flex',
-        alignItems: 'center',
+        display: 'flex', alignItems: 'center',
         justifyContent: 'space-between',
         background: '#ffffff',
         boxShadow: '0 1px 12px rgba(0,0,0,0.05)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
+        position: 'sticky', top: 0, zIndex: 100,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
@@ -370,8 +383,7 @@ Ask me anything or pick a quick question below.`)
             <div style={{
               fontFamily: "'DM Serif Display', serif",
               fontSize: 20, fontWeight: 400,
-              color: '#0f172a', letterSpacing: '-0.3px',
-              lineHeight: 1,
+              color: '#0f172a', letterSpacing: '-0.3px', lineHeight: 1,
             }}>
               Football<span style={{ color: '#2563eb' }}>IQ</span>
             </div>
@@ -392,12 +404,14 @@ Ask me anything or pick a quick question below.`)
               background: '#22c55e',
               boxShadow: '0 0 0 2px rgba(34,197,94,0.3)',
             }} />
-            <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Live Odds</span>
+            <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
+              Live Data
+            </span>
           </div>
           <button
             onClick={() => setMessages([{
               role: 'assistant',
-              content: formatMessage('## New Analysis Session\n\nReady for a fresh set of predictions! Ask me about any league, fixture or market. 👇')
+              content: formatMessage('## New Session Ready ⚽\n\nFresh start! Ask me about any league, fixture or market and I\'ll search for the latest data. 👇')
             }])}
             style={{
               background: '#f8faff', border: '1px solid #e2e8f0',
@@ -428,17 +442,12 @@ Ask me anything or pick a quick question below.`)
             onClick={() => sendMessage(q)}
             disabled={loading}
             style={{
-              background: '#f8faff',
-              border: '1px solid #e2e8f0',
-              color: '#475569',
-              borderRadius: 20,
-              padding: '6px 14px',
-              fontSize: 12, fontWeight: 500,
+              background: '#f8faff', border: '1px solid #e2e8f0',
+              color: '#475569', borderRadius: 20,
+              padding: '6px 14px', fontSize: 12, fontWeight: 500,
               cursor: loading ? 'not-allowed' : 'pointer',
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-              transition: 'all 0.2s',
-              opacity: loading ? 0.5 : 1,
+              whiteSpace: 'nowrap', flexShrink: 0,
+              transition: 'all 0.2s', opacity: loading ? 0.5 : 1,
               display: 'flex', alignItems: 'center', gap: 5,
             }}
           >
@@ -486,7 +495,10 @@ Ask me anything or pick a quick question below.`)
               <img
                 src={img.preview}
                 alt="upload"
-                style={{ height: 56, width: 56, objectFit: 'cover', display: 'block' }}
+                style={{
+                  height: 56, width: 56,
+                  objectFit: 'cover', display: 'block'
+                }}
               />
               <button
                 onClick={() => removeImage(idx)}
@@ -495,8 +507,8 @@ Ask me anything or pick a quick question below.`)
                   background: 'rgba(0,0,0,0.5)', border: 'none',
                   borderRadius: '50%', width: 16, height: 16,
                   cursor: 'pointer', color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: 0,
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', padding: 0,
                 }}
               >
                 <X size={10} />
@@ -505,15 +517,14 @@ Ask me anything or pick a quick question below.`)
           ))}
           <div style={{
             fontSize: 12, color: '#64748b',
-            display: 'flex', alignItems: 'center',
-            paddingLeft: 4,
+            display: 'flex', alignItems: 'center', paddingLeft: 4,
           }}>
             {images.length} image{images.length > 1 ? 's' : ''} ready
           </div>
         </div>
       )}
 
-      {/* Input Area */}
+      {/* Input */}
       <div style={{
         borderTop: '1px solid #e8edf5',
         padding: '16px 28px 20px',
@@ -524,8 +535,7 @@ Ask me anything or pick a quick question below.`)
           maxWidth: 900, margin: '0 auto',
           background: '#f8faff',
           border: '1.5px solid #e2e8f0',
-          borderRadius: 16,
-          overflow: 'hidden',
+          borderRadius: 16, overflow: 'hidden',
           transition: 'border-color 0.2s',
         }}
           onFocusCapture={e => e.currentTarget.style.borderColor = '#3b82f6'}
@@ -541,7 +551,7 @@ Ask me anything or pick a quick question below.`)
                 sendMessage()
               }
             }}
-            placeholder="Ask anything... e.g. 'Best bets this weekend across all leagues?'"
+            placeholder="Ask anything... e.g. 'Full analysis of all UCL matches this week'"
             rows={1}
             style={{
               width: '100%', border: 'none', outline: 'none',
@@ -549,8 +559,7 @@ Ask me anything or pick a quick question below.`)
               padding: '14px 16px 0',
               fontSize: 14, lineHeight: 1.6,
               color: '#1e293b', resize: 'none',
-              fontFamily: 'inherit',
-              minHeight: 44,
+              fontFamily: 'inherit', minHeight: 44,
             }}
           />
 
@@ -574,8 +583,7 @@ Ask me anything or pick a quick question below.`)
                 disabled={loading}
                 title="Upload images"
                 style={{
-                  background: 'none',
-                  border: '1px solid #e2e8f0',
+                  background: 'none', border: '1px solid #e2e8f0',
                   borderRadius: 8, padding: '5px 10px',
                   cursor: 'pointer', color: '#94a3b8',
                   display: 'flex', alignItems: 'center',
@@ -584,7 +592,9 @@ Ask me anything or pick a quick question below.`)
                 }}
               >
                 <ImagePlus size={14} />
-                {images.length > 0 ? `${images.length} image${images.length > 1 ? 's' : ''}` : 'Add images'}
+                {images.length > 0
+                  ? `${images.length} image${images.length > 1 ? 's' : ''}`
+                  : 'Add images'}
               </button>
               <span style={{ fontSize: 11, color: '#cbd5e1' }}>
                 Shift+Enter for new line
@@ -599,11 +609,12 @@ Ask me anything or pick a quick question below.`)
                 background: loading || (!input.trim() && images.length === 0)
                   ? '#e2e8f0'
                   : 'linear-gradient(135deg, #1d4ed8, #3b82f6)',
-                border: 'none',
-                borderRadius: 10,
+                border: 'none', borderRadius: 10,
                 padding: '8px 18px',
-                cursor: loading || (!input.trim() && images.length === 0) ? 'not-allowed' : 'pointer',
-                color: loading || (!input.trim() && images.length === 0) ? '#94a3b8' : '#fff',
+                cursor: loading || (!input.trim() && images.length === 0)
+                  ? 'not-allowed' : 'pointer',
+                color: loading || (!input.trim() && images.length === 0)
+                  ? '#94a3b8' : '#fff',
                 display: 'flex', alignItems: 'center', gap: 7,
                 fontSize: 13, fontWeight: 600,
                 transition: 'all 0.2s',
@@ -622,7 +633,7 @@ Ask me anything or pick a quick question below.`)
           textAlign: 'center', color: '#cbd5e1',
           fontSize: 11, marginTop: 10, fontWeight: 500,
         }}>
-          FootballIQ • Live odds via The Odds API • Please gamble responsibly
+          FootballIQ • Gemini live search + Claude analysis • Please gamble responsibly
         </div>
       </div>
     </div>
