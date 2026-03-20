@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/research.js": {
-      "maxDuration": 30
+      "maxDuration": 45
     },
     "api/predict.js": {
       "maxDuration": 60
