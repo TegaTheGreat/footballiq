@@ -1,12 +1,13 @@
-export default async (req) => {
+export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      }
-    })
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    return res.status(200).end()
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
   }
 
   try {
@@ -15,9 +16,7 @@ export default async (req) => {
     const ODDS_API_KEY = process.env.ODDS_API_KEY
     const APISPORTS_KEY = process.env.APISPORTS_KEY
 
-    const bodyText = await req.text()
-    const body = JSON.parse(bodyText)
-    const { messages, question, image, images } = body
+    const { messages, question, image, images } = req.body
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
@@ -30,10 +29,14 @@ export default async (req) => {
     const fetchGemini = async () => {
       if (!GEMINI_API_KEY) return ''
       try {
-        const res = await fetch(
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 25000)
+
+        const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
           {
             method: 'POST',
+            signal: controller.signal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{
@@ -65,15 +68,18 @@ STEP 3 — RETURN a concise bulleted list of raw facts only. No intro, no outro:
 Search multiple times. Never return empty.` }]
               }],
               tools: [{ google_search: {} }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 2000 }
+              generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }
             })
           }
         )
-        const data = await res.json()
+
+        clearTimeout(timeout)
+        const data = await response.json()
         const text = data?.candidates?.[0]?.content?.parts
           ?.filter(p => p.text)
           ?.map(p => p.text)
           ?.join('\n')
+
         if (text && text.length > 100) {
           console.log('Gemini success, chars:', text.length)
           return text
@@ -81,7 +87,11 @@ Search multiple times. Never return empty.` }]
         console.log('Gemini empty:', JSON.stringify(data).slice(0, 200))
         return ''
       } catch (e) {
-        console.log('Gemini error:', e.message)
+        if (e.name === 'AbortError') {
+          console.log('Gemini timed out')
+        } else {
+          console.log('Gemini error:', e.message)
+        }
         return ''
       }
     }
@@ -96,6 +106,11 @@ Search multiple times. Never return empty.` }]
         { key: 'soccer_germany_bundesliga', name: 'Bundesliga' },
         { key: 'soccer_italy_serie_a', name: 'Serie A' },
         { key: 'soccer_france_ligue_one', name: 'Ligue 1' },
+        { key: 'soccer_netherlands_eredivisie', name: 'Eredivisie' },
+        { key: 'soccer_belgium_first_div', name: 'Belgian Pro League' },
+        { key: 'soccer_portugal_primeira_liga', name: 'Primeira Liga' },
+        { key: 'soccer_scotland_premiership', name: 'Scottish Premiership' },
+        { key: 'soccer_saudi_professional_league', name: 'Saudi Pro League' },
       ]
       try {
         const results = await Promise.all(
@@ -182,7 +197,7 @@ Search multiple times. Never return empty.` }]
     const totalFixtures = oddsData.total
 
     // ============================================
-    // STEP 3: CLAUDE ANALYSES EVERYTHING
+    // BUILD CLAUDE SYSTEM PROMPT
     // ============================================
     const systemPrompt = `You are FootballIQ, an elite football analyst and betting advisor for the 2025/26 season. You think and communicate like a brilliant analyst — warm, sharp, and data-driven.
 
@@ -257,7 +272,7 @@ After all matches:
 - Brief responsible gambling note at end`
 
     // ============================================
-    // STEP 4: BUILD MESSAGES WITH IMAGE SUPPORT
+    // BUILD MESSAGES
     // ============================================
     let userContent
     const imageList = images || (image ? [image] : [])
@@ -298,7 +313,7 @@ After all matches:
     ]
 
     // ============================================
-    // STEP 5: STREAM CLAUDE'S ANALYSIS
+    // STREAM CLAUDE'S ANALYSIS
     // ============================================
     const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -318,78 +333,50 @@ After all matches:
 
     if (!claudeResponse.ok) {
       const errText = await claudeResponse.text()
-      return new Response(JSON.stringify({ error: errText }), {
-        status: claudeResponse.status,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      })
+      return res.status(claudeResponse.status).json({ error: errText })
     }
 
     // ============================================
-    // STEP 6: STREAM TO CLIENT
+    // STREAM TO CLIENT
     // ============================================
-    const stream = new TransformStream()
-    const writer = stream.writable.getWriter()
-    const encoder = new TextEncoder()
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Connection', 'keep-alive')
+
     const reader = claudeResponse.body.getReader()
     const decoder = new TextDecoder()
 
-    ;(async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n').filter(l => l.trim())
+      const chunk = decoder.decode(value)
+      const lines = chunk.split('\n').filter(l => l.trim())
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6)
-              if (data === '[DONE]') continue
-              try {
-                const parsed = JSON.parse(data)
-                if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                  await writer.write(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`
-                    )
-                  )
-                }
-              } catch (e) {}
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          if (data === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(data)
+            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+              res.write(`data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`)
             }
-          }
+          } catch (e) {}
         }
-        await writer.write(encoder.encode('data: [DONE]\n\n'))
-      } catch (e) {
-        console.log('Stream error:', e.message)
-      } finally {
-        await writer.close()
       }
-    })()
+    }
 
-    return new Response(stream.readable, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Access-Control-Allow-Origin': '*',
-        'Connection': 'keep-alive',
-      }
-    })
+    res.write('data: [DONE]\n\n')
+    res.end()
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    })
+    console.log('Function error:', err.message)
+    res.status(500).json({ error: err.message })
   }
 }
 
 export const config = {
-  path: '/api/predict'
+  maxDuration: 60,
 }
