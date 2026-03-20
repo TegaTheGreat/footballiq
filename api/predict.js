@@ -27,20 +27,20 @@ export default async function handler(req, res) {
     // ============================================
 
     const fetchGemini = async () => {
-      if (!GEMINI_API_KEY) return ''
+      if (!GEMINI_API_KEY || !question) return ''
       try {
         const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 25000)
+        const timeout = setTimeout(() => controller.abort(), 15000)
 
         const response = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`,
-{
-  method: 'POST',
-  signal: controller.signal,
-  headers: {
-    'Content-Type': 'application/json',
-    'x-goog-api-key': GEMINI_API_KEY,
-  },
+          {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': GEMINI_API_KEY,
+            },
             body: JSON.stringify({
               contents: [{
                 parts: [{ text: `You are an elite sports researcher with live Google Search access. Today is ${today}.
@@ -49,7 +49,7 @@ The user is asking: "${question}"
 
 STEP 1 — THINK before you search. Identify:
 - What specific teams, leagues or competitions are being asked about?
-- If the request is general like "best bets this weekend" — automatically identify the biggest matches happening this weekend across Premier League, Championship, Champions League, Europa League, Bundesliga, Serie A, La Liga, Ligue 1, Eredivisie, Scottish Premiership, Belgian Pro League, Primeira Liga, Saudi Pro League and Brazilian Serie A
+- If the request is general like "best bets this weekend" — automatically identify the biggest matches happening this weekend across Premier League, Championship, Champions League, Europa League, Bundesliga, Serie A, La Liga, Ligue 1, Eredivisie, Scottish Premiership, Belgian Pro League, Primeira Liga, Saudi Pro League
 
 STEP 2 — SEARCH for each identified match or team:
 - "[Team A] vs [Team B] preview ${today}"
@@ -68,10 +68,10 @@ STEP 3 — RETURN a concise bulleted list of raw facts only. No intro, no outro:
 - [League] top 6: [teams with points]
 - Breaking news: [any relevant injury or tactical news]
 
-Search multiple times. Never return empty.` }]
+Be fast and concise. Return only facts.` }]
               }],
               tools: [{ google_search: {} }],
-              generationConfig: { temperature: 0.1, maxOutputTokens: 3000 }
+              generationConfig: { temperature: 0.1, maxOutputTokens: 1500 }
             })
           }
         )
@@ -87,11 +87,11 @@ Search multiple times. Never return empty.` }]
           console.log('Gemini success, chars:', text.length)
           return text
         }
-        console.log('Gemini empty:', JSON.stringify(data).slice(0, 200))
+        console.log('Gemini empty:', JSON.stringify(data).slice(0, 300))
         return ''
       } catch (e) {
         if (e.name === 'AbortError') {
-          console.log('Gemini timed out')
+          console.log('Gemini timed out after 15s')
         } else {
           console.log('Gemini error:', e.message)
         }
@@ -103,7 +103,6 @@ Search multiple times. Never return empty.` }]
       if (!ODDS_API_KEY) return { context: '', total: 0 }
       const sports = [
         { key: 'soccer_epl', name: 'Premier League' },
-        { key: 'soccer_epl_cup', name: 'FA Cup' },
         { key: 'soccer_uefa_champs_league', name: 'Champions League' },
         { key: 'soccer_uefa_europa_league', name: 'Europa League' },
         { key: 'soccer_uefa_europa_conference_league', name: 'Conference League' },
@@ -219,7 +218,7 @@ CRITICAL RULE: You have a limited response window. When asked for many matches:
 TODAY: ${today}
 
 === LIVE DATA FROM GEMINI GOOGLE SEARCH ===
-${liveData || 'Gemini returned no data. Use 2025/26 season knowledge but state confidence is based on training knowledge.'}
+${liveData || 'Gemini returned no live data. Use your 2025/26 season knowledge confidently — you know standings, form, results and fixtures for all major leagues.'}
 
 === LIVE BETTING ODDS (${totalFixtures} fixtures) ===
 ${oddsContext || 'No odds data available'}
@@ -232,7 +231,7 @@ STEP 1 — ASSESS YOUR DATA
 Check what Gemini found. Strong data = high confidence. Thin data = lower confidence, say why.
 
 STEP 2 — BUILD MATCH PROFILES
-For each match extract from Gemini's data:
+For each match extract:
 - Current form and recent results
 - Goals scored and conceded trends
 - Home and away records
@@ -248,9 +247,9 @@ STEP 3 — CROSS REFERENCE WITH ODDS
 STEP 4 — ONLY MAKE INFORMED PREDICTIONS
 - Strong data = confident prediction
 - Limited data = lower confidence, say so
-- No data = flag as insufficient, do not guess
+- Never random guess
 
-STEP 5 — STRUCTURE EACH MATCH LIKE THIS:
+STEP 5 — STRUCTURE EACH MATCH:
 
 ### [Home Team] vs [Away Team]
 **Odds:** Home [x] | Draw [x] | Away [x] | **Form:** [Home last 5] | [Away last 5]
@@ -270,13 +269,12 @@ After ALL matches:
 [2-3 matches max with brief reason]
 
 === COMMUNICATION ===
-- Think out loud — show reasoning from actual data
+- Think out loud from actual data
 - Reference specific stats Gemini found
-- Honest about confidence based on data quality
-- Never fabricate — if Gemini did not find it say data is limited
-- Complete every analysis fully — never cut off
-- Warm and conversational but always data driven
-- No random guesses — only informed predictions
+- Honest about confidence
+- Never fabricate data
+- Complete every analysis fully
+- Warm and conversational but data driven
 - Brief responsible gambling note at end`
 
     // ============================================
@@ -383,8 +381,4 @@ After ALL matches:
     console.log('Function error:', err.message)
     res.status(500).json({ error: err.message })
   }
-}
-
-export const config = {
-  maxDuration: 60,
 }
