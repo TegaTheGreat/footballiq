@@ -324,7 +324,38 @@ After all matches:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
+       max_tokens: 16000,
+```
+
+**Fix 2 — Tell Claude to be more concise per match so it covers everything:**
+
+Find this in the system prompt:
+```
+STEP 5 — STRUCTURE YOUR RESPONSE:
+```
+
+Replace that entire section with:
+```
+STEP 5 — STRUCTURE YOUR RESPONSE:
+
+Be concise per match — 4-6 lines max per fixture. Cover every match first, then the summary table and accumulator at the end.
+
+### [Home Team] vs [Away Team]
+**Odds:** Home [x] | Draw [x] | Away [x] | **Form:** [Home last 5] | [Away last 5]
+**Key Absences:** [injuries] | **H2H:** [last 2 results]
+**Analysis:** [2-3 sentences of reasoning]
+**Prediction:** [pick] — [confidence]% | **Best Bet:** [market]
+
+After ALL matches are covered:
+
+## Summary Table
+[HTML predictions table]
+
+## Best Accumulator
+[3-4 picks with combined odds]
+
+## Matches to Avoid
+[2-3 matches max]
         stream: true,
         system: systemPrompt,
         messages: allMessages,
