@@ -1,5 +1,8 @@
 {
   "functions": {
+    "api/research.js": {
+      "maxDuration": 30
+    },
     "api/predict.js": {
       "maxDuration": 60
     }
