@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/refresh.js": {
-      "maxDuration": 45
+      "maxDuration": 60
     },
     "api/research.js": {
       "maxDuration": 25
