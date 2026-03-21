@@ -1,6 +1,6 @@
 // =============================================================
-// api/_cache.js — Upstash Redis cache layer
-// Uses REST API — no npm packages needed
+// api/_cache.js â€” Upstash Redis cache layer
+// Uses REST API â€” no npm packages needed
 // Falls back to in-memory for local dev or if Redis isn't set up
 // =============================================================
 
