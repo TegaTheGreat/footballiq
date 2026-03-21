@@ -1,120 +1,187 @@
 // =============================================================
-// /api/research.js â€” STAGE 1
-// Reads ALL data from Redis cache (instant)
-// Optional: Gemini live search for breaking news (bonus)
-// Expected time: 1-3 seconds (cache) + bonus if time allows
+// /api/refresh.js â€” Automated data refresh
+//
+// DATA SOURCES:
+//   Odds:      The Odds API â€” every 48 hours
+//   Standings: Gemini + Google Search â€” every 3 days
+//   Context:   Gemini (training knowledge) â€” every 24 hours
+//
+// TRIGGERS:
+//   - Vercel Cron (every 12 hours â€” checks what's stale)
+//   - Manual: visit /api/refresh in browser
+//   - Force all: /api/refresh?force=true
+//   - Force specific: /api/refresh?force=odds,standings,context
+//
 // =============================================================
 
-import { cacheGet } from './_cache.js'
+import { cacheGet, cacheSet } from './_cache.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-  if (req.method === 'OPTIONS') return res.status(200).end()
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   try {
+    const ODDS_API_KEY = process.env.ODDS_API_KEY
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-    const { question } = req.body
     const today = new Date().toISOString().split('T')[0]
-    const startTime = Date.now()
 
-    const status = {
-      odds: { success: false, error: null, fixtures: 0, age: null },
-      standings: { success: false, error: null, leagues: 0, age: null },
-      context: { success: false, error: null, chars: 0, age: null },
-      geminiLive: { success: false, error: null, chars: 0 },
+    const forceParam = (req.query?.force || '').toLowerCase()
+    const forceAll = forceParam === 'true'
+    const forceOdds = forceAll || forceParam.includes('odds')
+    const forceStandings = forceAll || forceParam.includes('standings')
+    const forceContext = forceAll || forceParam.includes('context')
+
+    const results = {
+      odds: { refreshed: false, reason: '', fixtures: 0 },
+      standings: { refreshed: false, reason: '', leagues: 0 },
+      context: { refreshed: false, reason: '', chars: 0 },
+      timestamp: new Date().toISOString(),
     }
 
     // ============================================
-    // READ ALL CACHED DATA IN PARALLEL (instant)
+    // Helper: hours since last update
     // ============================================
-    const [
-      oddsText, oddsTotal, oddsUpdated,
-      standingsText, standingsLeagues, standingsUpdated,
-      contextText, contextChars, contextUpdated,
-    ] = await Promise.all([
-      cacheGet('odds:text'),
-      cacheGet('odds:total'),
-      cacheGet('odds:updated_at'),
-      cacheGet('standings:text'),
-      cacheGet('standings:leagues'),
-      cacheGet('standings:updated_at'),
-      cacheGet('context:text'),
-      cacheGet('context:chars'),
-      cacheGet('context:updated_at'),
-    ])
-
-    // Odds
-    if (oddsText && oddsTotal) {
-      status.odds.success = true
-      status.odds.fixtures = oddsTotal
-      status.odds.age = oddsUpdated ? `${Math.round((Date.now() - new Date(oddsUpdated).getTime()) / 3600000)}h ago` : null
-    } else {
-      status.odds.error = 'No cached data â€” visit /api/refresh'
+    async function hoursSince(key) {
+      const ts = await cacheGet(key)
+      if (!ts) return 9999
+      return (Date.now() - new Date(ts).getTime()) / (1000 * 60 * 60)
     }
 
-    // Standings
-    if (standingsText && standingsLeagues) {
-      status.standings.success = true
-      status.standings.leagues = standingsLeagues
-      status.standings.age = standingsUpdated ? `${Math.round((Date.now() - new Date(standingsUpdated).getTime()) / 3600000)}h ago` : null
-    } else {
-      status.standings.error = 'No cached data â€” visit /api/refresh'
-    }
-
-    // Match context
-    if (contextText) {
-      status.context.success = true
-      status.context.chars = contextChars || contextText.length
-      status.context.age = contextUpdated ? `${Math.round((Date.now() - new Date(contextUpdated).getTime()) / 3600000)}h ago` : null
-    } else {
-      status.context.error = 'No cached data â€” visit /api/refresh'
-    }
-
-    const cacheReadTime = Date.now() - startTime
-    console.log(`Cache read: ${cacheReadTime}ms`)
-
     // ============================================
-    // OPTIONAL: Gemini live search for breaking news
-    // Only fires if question is provided and time allows
+    // ODDS â€” Refresh every 48 hours
     // ============================================
-    let geminiLiveData = ''
-    const TOTAL_BUDGET = 23000 // 23s â€” gives live search ~20s after cache read
+    const oddsAge = await hoursSince('odds:updated_at')
 
-    if (GEMINI_API_KEY && question) {
-      const remainingMs = TOTAL_BUDGET - (Date.now() - startTime)
-
-      if (remainingMs > 6000) {
+    if (forceOdds || oddsAge > 48) {
+      if (!ODDS_API_KEY) {
+        results.odds.reason = 'No API key'
+      } else {
         try {
+          const sports = [
+            { key: 'soccer_epl', name: 'Premier League' },
+            { key: 'soccer_uefa_champs_league', name: 'Champions League' },
+            { key: 'soccer_uefa_europa_league', name: 'Europa League' },
+            { key: 'soccer_uefa_europa_conference_league', name: 'Conference League' },
+            { key: 'soccer_spain_la_liga', name: 'La Liga' },
+            { key: 'soccer_germany_bundesliga', name: 'Bundesliga' },
+            { key: 'soccer_italy_serie_a', name: 'Serie A' },
+            { key: 'soccer_france_ligue_one', name: 'Ligue 1' },
+            { key: 'soccer_netherlands_eredivisie', name: 'Eredivisie' },
+            { key: 'soccer_belgium_first_div', name: 'Belgian Pro League' },
+            { key: 'soccer_portugal_primeira_liga', name: 'Primeira Liga' },
+            { key: 'soccer_scotland_premiership', name: 'Scottish Premiership' },
+            { key: 'soccer_saudi_professional_league', name: 'Saudi Pro League' },
+            { key: 'soccer_brazil_campeonato', name: 'Brazilian Serie A' },
+            { key: 'soccer_argentina_primera_division', name: 'Argentine Primera' },
+          ]
+
+          const allResults = []
+          for (let i = 0; i < sports.length; i += 5) {
+            const batch = sports.slice(i, i + 5)
+            const batchResults = await Promise.all(
+              batch.map((s) =>
+                fetch(`https://api.the-odds-api.com/v4/sports/${s.key}/odds/?apiKey=${ODDS_API_KEY}&regions=uk&markets=h2h&dateFormat=iso&oddsFormat=decimal`)
+                  .then((r) => r.ok ? r.json() : [])
+                  .catch(() => [])
+              )
+            )
+            allResults.push(...batchResults.map((fixtures, idx) => ({
+              league: batch[idx].name,
+              fixtures: Array.isArray(fixtures) ? fixtures : [],
+            })))
+          }
+
+          // Build readable context
+          let oddsText = ''
+          let total = 0
+          allResults.forEach(({ league, fixtures }) => {
+            if (!fixtures.length) return
+            oddsText += `\n${league}:\n`
+            fixtures.forEach((f) => {
+              if (!f.home_team || !f.away_team) return
+              total++
+              const date = new Date(f.commence_time).toLocaleDateString('en-GB', {
+                weekday: 'short', day: 'numeric', month: 'short',
+                hour: '2-digit', minute: '2-digit',
+              })
+              let h = null, d = null, a = null
+              if (f.bookmakers?.[0]?.markets) {
+                const h2h = f.bookmakers[0].markets.find((m) => m.key === 'h2h')
+                if (h2h) {
+                  h = h2h.outcomes?.find((o) => o.name === f.home_team)?.price
+                  a = h2h.outcomes?.find((o) => o.name === f.away_team)?.price
+                  d = h2h.outcomes?.find((o) => o.name === 'Draw')?.price
+                }
+              }
+              oddsText += `${date}: ${f.home_team} vs ${f.away_team}`
+              if (h) {
+                oddsText += ` | Home:${h} Draw:${d || 'N/A'} Away:${a}`
+                if (h <= 1.4) oddsText += ` [STRONG FAV]`
+                if (h >= 3.5 && a >= 3.5) oddsText += ` [OPEN]`
+              }
+              oddsText += '\n'
+            })
+          })
+
+          // Store with 72hr TTL (safety net â€” we refresh every 48hr)
+          await cacheSet('odds:text', oddsText, 259200)
+          await cacheSet('odds:total', total, 259200)
+          await cacheSet('odds:updated_at', new Date().toISOString(), 259200)
+
+          results.odds.refreshed = true
+          results.odds.fixtures = total
+          results.odds.reason = `Refreshed (was ${Math.round(oddsAge)}h old)`
+        } catch (e) {
+          results.odds.reason = `Error: ${e.message}`
+        }
+      }
+    } else {
+      results.odds.reason = `Fresh (${Math.round(oddsAge)}h old, refreshes at 48h)`
+      results.odds.fixtures = (await cacheGet('odds:total')) || 0
+    }
+
+    // ============================================
+    // STANDINGS â€” Gemini WITH Google Search
+    // Searches for current league tables once daily
+    // Uses search grounding â€” slow but accurate
+    // 55s timeout is fine for a background job
+    // Costs 1 Gemini call per refresh
+    // ============================================
+    const standingsAge = await hoursSince('standings:updated_at')
+
+    if (forceStandings || standingsAge > 72) {
+      if (!GEMINI_API_KEY) {
+        results.standings.reason = 'No Gemini API key'
+      } else {
+        try {
+          const standingsPrompt = `You are a football data researcher with Google Search. Today is ${today}.
+
+Search for the CURRENT 2025/26 season standings for these leagues:
+1. Premier League
+2. La Liga
+3. Bundesliga
+4. Serie A
+5. Ligue 1
+6. Champions League group/league stage
+7. Europa League
+8. Eredivisie
+9. Primeira Liga (Portugal)
+10. Belgian Pro League
+11. Scottish Premiership
+
+For each league, return the top 10 teams in this exact format:
+
+[League Name]:
+1. [Team] | [Points]pts | W[wins] D[draws] L[losses] | GD:[goal difference]
+2. [Team] | [Points]pts | W[wins] D[draws] L[losses] | GD:[goal difference]
+...
+
+Return ONLY the standings data. No intro, no analysis, no outro. Be accurate â€” use the most recent data you can find.`
+
           const controller = new AbortController()
           let timedOut = false
-          const timeout = setTimeout(() => { timedOut = true; controller.abort() }, remainingMs - 1000)
+          const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 55000)
 
-          const livePrompt = `You are a football data researcher with Google Search. Today is ${today}. Current season is 2025/26.
-
-The user is asking: "${question}"
-
-Search Google for CURRENT data relevant to this question:
-
-1. RECENT RESULTS â€” Last 5 match results for each relevant team with actual scores (e.g. Arsenal 3-1 Brighton, March 15 2026)
-2. CURRENT FORM â€” Win/draw/loss streaks, goals scored/conceded recently
-3. UPCOMING FIXTURES â€” Confirmed dates, kick-off times
-4. TEAM NEWS â€” Confirmed injuries, suspensions, returns from injury
-5. HEAD TO HEAD â€” Recent meetings between the teams with scores
-6. LEAGUE POSITION â€” Current standing, points, goal difference
-7. MANAGER & TACTICS â€” Current manager (as of March 2026), formation, style
-
-CRITICAL RULES:
-- Only return facts you actually found via search. NEVER guess or invent a score.
-- If you cannot find a specific result, skip it â€” do not fabricate.
-- Include the date for each result you cite (e.g. "March 15 2026")
-- Focus on the teams/leagues the user is asking about, not everything
-
-Return bullet points only. No intro, no analysis, no outro. Maximum 30 bullet points.`
-
+          // Use streaming so we capture partial data if it's slow
           const response = await fetch(
             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
             {
@@ -125,9 +192,9 @@ Return bullet points only. No intro, no analysis, no outro. Maximum 30 bullet po
                 'x-goog-api-key': GEMINI_API_KEY,
               },
               body: JSON.stringify({
-                contents: [{ parts: [{ text: livePrompt }] }],
+                contents: [{ parts: [{ text: standingsPrompt }] }],
                 tools: [{ google_search: {} }],
-                generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
+                generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
               }),
             }
           )
@@ -158,59 +225,183 @@ Return bullet points only. No intro, no analysis, no outro. Maximum 30 bullet po
                 }
               }
             } catch (streamErr) {
-              if (streamErr.name !== 'AbortError') console.log('Live stream error:', streamErr.message)
+              if (streamErr.name !== 'AbortError') {
+                console.log('Standings stream error:', streamErr.message)
+              }
             }
 
             clearTimeout(timeout)
 
-            if (collected.length > 30) {
-              geminiLiveData = collected
-              status.geminiLive.success = true
-              status.geminiLive.chars = collected.length
-              if (timedOut) status.geminiLive.error = `Partial (${collected.length} chars)`
+            // Count how many leagues we got by looking for common league name patterns
+            const leagueCount = [
+              'Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Ligue 1',
+              'Champions League', 'Europa League', 'Eredivisie', 'Primeira Liga',
+              'Belgian', 'Scottish'
+            ].filter(name => collected.toLowerCase().includes(name.toLowerCase())).length
+
+            if (collected.length > 200) {
+              const standingsText = '\n=== STANDINGS ===\n' + collected
+
+              await cacheSet('standings:text', standingsText, 345600)
+              await cacheSet('standings:leagues', leagueCount, 345600)
+              await cacheSet('standings:updated_at', new Date().toISOString(), 345600)
+
+              results.standings.refreshed = true
+              results.standings.leagues = leagueCount
+              results.standings.reason = timedOut
+                ? `Partial refresh â€” ${collected.length} chars before timeout`
+                : `Refreshed (was ${Math.round(standingsAge)}h old)`
             } else {
-              status.geminiLive.error = timedOut ? 'Timed out, no data' : 'No breaking news found'
+              results.standings.reason = timedOut
+                ? `Timed out with only ${collected.length} chars`
+                : `Too little data (${collected.length} chars)`
             }
           } else {
             clearTimeout(timeout)
-            status.geminiLive.error = `HTTP ${response.status}`
+            const err = await response.text()
+            results.standings.reason = `Gemini HTTP ${response.status}: ${err.slice(0, 150)}`
           }
         } catch (e) {
-          status.geminiLive.error = e.name === 'AbortError' ? 'Timed out' : e.message
+          results.standings.reason = e.name === 'AbortError'
+            ? 'Timed out after 55s'
+            : `Error: ${e.message}`
         }
-      } else {
-        status.geminiLive.error = 'Skipped â€” not enough time'
       }
+    } else {
+      results.standings.reason = `Fresh (${Math.round(standingsAge)}h old, refreshes at 72h)`
+      results.standings.leagues = (await cacheGet('standings:leagues')) || 0
     }
 
     // ============================================
-    // BUILD COMBINED DATA FOR CLAUDE
+    // MATCH CONTEXT â€” Gemini WITH Google Search
+    // Must use search grounding because training
+    // knowledge is outdated (knows 2023/24, not 2025/26)
+    // Streaming to capture partial data if slow
+    // 55s timeout â€” background job, no rush
     // ============================================
-    let geminiCombined = ''
-    if (contextText) {
-      geminiCombined += '=== MATCH CONTEXT (Form, H2H, Tactics) ===\n' + contextText
-    }
-    if (geminiLiveData) {
-      geminiCombined += '\n\n=== LIVE SEARCH DATA (Current results, form, team news) ===\n' + geminiLiveData
+    const contextAge = await hoursSince('context:updated_at')
+
+    if (forceContext || contextAge > 24) {
+      if (!GEMINI_API_KEY) {
+        results.context.reason = 'No Gemini API key'
+      } else {
+        try {
+          const oddsText = await cacheGet('odds:text')
+
+          if (!oddsText) {
+            results.context.reason = 'No odds data in cache â€” refresh odds first'
+          } else {
+            // Extract fixture lines â€” just team names
+            const fixtureLines = oddsText
+              .split('\n')
+              .filter(line => line.includes(' vs '))
+              .slice(0, 40) // cap at 40 for search-grounded call
+              .join('\n')
+
+            const prompt = `You are a football data researcher with Google Search. Today is ${today}. The current season is 2025/26.
+
+Here are upcoming fixtures:
+
+${fixtureLines}
+
+For each fixture, SEARCH for current 2025/26 season data:
+
+1. FORM â€” Each team's last 5 results THIS SEASON with scores (e.g. W 2-1, L 0-3)
+2. H2H â€” Last 3 head-to-head meetings with scores
+3. TACTICAL â€” CURRENT manager (as of March 2026), formation, playing style, season objective
+
+IMPORTANT: Use the 2025/26 season data ONLY. Do not use data from previous seasons.
+
+Format as bullet points grouped by match. Facts only, no analysis, no intro, no outro.`
+
+            const controller = new AbortController()
+            let timedOut = false
+            const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 55000)
+
+            const response = await fetch(
+              'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
+              {
+                method: 'POST',
+                signal: controller.signal,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-goog-api-key': GEMINI_API_KEY,
+                },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: prompt }] }],
+                  tools: [{ google_search: {} }], // SEARCH GROUNDING â€” gets current data
+                  generationConfig: { temperature: 0.1, maxOutputTokens: 8000 },
+                }),
+              }
+            )
+
+            if (response.ok) {
+              let collected = ''
+              const reader = response.body.getReader()
+              const decoder = new TextDecoder()
+
+              try {
+                while (true) {
+                  const { done, value } = await reader.read()
+                  if (done) break
+                  const chunk = decoder.decode(value, { stream: true })
+                  for (const line of chunk.split('\n')) {
+                    if (!line.startsWith('data: ')) continue
+                    const jsonStr = line.slice(6).trim()
+                    if (!jsonStr || jsonStr === '[DONE]') continue
+                    try {
+                      const parsed = JSON.parse(jsonStr)
+                      const parts = parsed?.candidates?.[0]?.content?.parts
+                      if (parts) {
+                        for (const p of parts) {
+                          if (p.text) collected += p.text
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                }
+              } catch (streamErr) {
+                if (streamErr.name !== 'AbortError') {
+                  console.log('Context stream error:', streamErr.message)
+                }
+              }
+
+              clearTimeout(timeout)
+
+              if (collected.length > 100) {
+                await cacheSet('context:text', collected, 108000)
+                await cacheSet('context:chars', collected.length, 108000)
+                await cacheSet('context:updated_at', new Date().toISOString(), 108000)
+
+                results.context.refreshed = true
+                results.context.chars = collected.length
+                results.context.reason = timedOut
+                  ? `Partial â€” ${collected.length} chars before timeout`
+                  : `Refreshed (was ${Math.round(contextAge)}h old)`
+              } else {
+                results.context.reason = timedOut
+                  ? `Timed out with only ${collected.length} chars`
+                  : `Too little data (${collected.length} chars)`
+              }
+            } else {
+              clearTimeout(timeout)
+              const err = await response.text()
+              results.context.reason = `Gemini HTTP ${response.status}: ${err.slice(0, 150)}`
+            }
+          }
+        } catch (e) {
+          results.context.reason = e.name === 'AbortError'
+            ? 'Gemini timed out after 55s'
+            : `Error: ${e.message}`
+        }
+      }
+    } else {
+      results.context.reason = `Fresh (${Math.round(contextAge)}h old, refreshes at 24h)`
+      results.context.chars = (await cacheGet('context:chars')) || 0
     }
 
-    // Check if cache needs refresh â€” signal to frontend
-    const needsRefresh = !oddsText || !standingsText || !contextText
-
-    return res.status(200).json({
-      success: true,
-      elapsed_ms: Date.now() - startTime,
-      cache_read_ms: cacheReadTime,
-      needs_refresh: needsRefresh,
-      status,
-      data: {
-        gemini: geminiCombined,
-        odds: { context: oddsText || '', total: oddsTotal || 0 },
-        standings: standingsText || '',
-      },
-    })
+    return res.status(200).json(results)
   } catch (err) {
-    console.log('Research error:', err.message, err.stack)
-    return res.status(500).json({ success: false, error: err.message })
+    return res.status(500).json({ error: err.message })
   }
 }
