@@ -9,11 +9,5 @@
     "api/predict.js": {
       "maxDuration": 60
     }
-  },
-  "crons": [
-    {
-      "path": "/api/refresh?force=true",
-      "schedule": "0 6 * * *"
-    }
-  ]
+  }
 }
