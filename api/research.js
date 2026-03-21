@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     // Only fires if question is provided and time allows
     // ============================================
     let geminiLiveData = ''
-    const TOTAL_BUDGET = 20000
+    const TOTAL_BUDGET = 23000 // 23s â€” gives live search ~20s after cache read
 
     if (GEMINI_API_KEY && question) {
       const remainingMs = TOTAL_BUDGET - (Date.now() - startTime)
@@ -93,19 +93,27 @@ export default async function handler(req, res) {
           let timedOut = false
           const timeout = setTimeout(() => { timedOut = true; controller.abort() }, remainingMs - 1000)
 
-          const livePrompt = `You are a football news scout with Google Search. Today is ${today}.
+          const livePrompt = `You are a football data researcher with Google Search. Today is ${today}. Current season is 2025/26.
 
-The user is asking about: "${question}"
+The user is asking: "${question}"
 
-Search for ONLY breaking news from the last 48 hours that could affect match predictions:
-- Confirmed injuries or returns from injury
-- Managerial changes or tactical shifts
-- Suspensions (red cards, accumulated yellows)
-- Any match postponements or venue changes
+Search Google for CURRENT data relevant to this question:
 
-Return ONLY bullet points of confirmed news. No speculation, no analysis, no previews. If nothing recent found, say "No breaking news found."
+1. RECENT RESULTS â€” Last 5 match results for each relevant team with actual scores (e.g. Arsenal 3-1 Brighton, March 15 2026)
+2. CURRENT FORM â€” Win/draw/loss streaks, goals scored/conceded recently
+3. UPCOMING FIXTURES â€” Confirmed dates, kick-off times
+4. TEAM NEWS â€” Confirmed injuries, suspensions, returns from injury
+5. HEAD TO HEAD â€” Recent meetings between the teams with scores
+6. LEAGUE POSITION â€” Current standing, points, goal difference
+7. MANAGER & TACTICS â€” Current manager (as of March 2026), formation, style
 
-Be fast. Maximum 10 bullet points.`
+CRITICAL RULES:
+- Only return facts you actually found via search. NEVER guess or invent a score.
+- If you cannot find a specific result, skip it â€” do not fabricate.
+- Include the date for each result you cite (e.g. "March 15 2026")
+- Focus on the teams/leagues the user is asking about, not everything
+
+Return bullet points only. No intro, no analysis, no outro. Maximum 30 bullet points.`
 
           const response = await fetch(
             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
@@ -119,7 +127,7 @@ Be fast. Maximum 10 bullet points.`
               body: JSON.stringify({
                 contents: [{ parts: [{ text: livePrompt }] }],
                 tools: [{ google_search: {} }],
-                generationConfig: { temperature: 0.1, maxOutputTokens: 800 },
+                generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
               }),
             }
           )
@@ -183,7 +191,7 @@ Be fast. Maximum 10 bullet points.`
       geminiCombined += '=== MATCH CONTEXT (Form, H2H, Tactics) ===\n' + contextText
     }
     if (geminiLiveData) {
-      geminiCombined += '\n\n=== BREAKING NEWS (Last 48hrs) ===\n' + geminiLiveData
+      geminiCombined += '\n\n=== LIVE SEARCH DATA (Current results, form, team news) ===\n' + geminiLiveData
     }
 
     // Check if cache needs refresh â€” signal to frontend
