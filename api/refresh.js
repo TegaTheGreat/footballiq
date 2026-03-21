@@ -273,9 +273,11 @@ Return ONLY the standings data. No intro, no analysis, no outro. Be accurate â�
     }
 
     // ============================================
-    // MATCH CONTEXT â€” Gemini enrichment once daily
-    // NO search grounding â€” uses training knowledge
-    // 55s timeout since this is a background job
+    // MATCH CONTEXT â€” Gemini WITH Google Search
+    // Must use search grounding because training
+    // knowledge is outdated (knows 2023/24, not 2025/26)
+    // Streaming to capture partial data if slow
+    // 55s timeout â€” background job, no rush
     // ============================================
     const contextAge = await hoursSince('context:updated_at')
 
@@ -284,39 +286,40 @@ Return ONLY the standings data. No intro, no analysis, no outro. Be accurate â�
         results.context.reason = 'No Gemini API key'
       } else {
         try {
-          // Read cached odds to know which fixtures need context
           const oddsText = await cacheGet('odds:text')
 
           if (!oddsText) {
             results.context.reason = 'No odds data in cache â€” refresh odds first'
           } else {
-            // Extract just team names and leagues (not full odds text)
-            // This keeps the prompt small so Gemini responds faster
+            // Extract fixture lines â€” just team names
             const fixtureLines = oddsText
               .split('\n')
               .filter(line => line.includes(' vs '))
-              .slice(0, 60) // cap at 60 fixtures
+              .slice(0, 40) // cap at 40 for search-grounded call
               .join('\n')
 
-            const prompt = `You are a football analyst. Today is ${today} (2025/26 season).
+            const prompt = `You are a football data researcher with Google Search. Today is ${today}. The current season is 2025/26.
 
 Here are upcoming fixtures:
 
 ${fixtureLines}
 
-For each fixture, provide from your knowledge:
+For each fixture, SEARCH for current 2025/26 season data:
 
-1. FORM â€” Each team's last 5 results with scores (e.g. W 2-1, L 0-3)
-2. H2H â€” Last 3 head-to-head results
-3. TACTICAL â€” Manager, formation, playing style, motivation (title race, relegation, UCL focus, etc.)
+1. FORM â€” Each team's last 5 results THIS SEASON with scores (e.g. W 2-1, L 0-3)
+2. H2H â€” Last 3 head-to-head meetings with scores
+3. TACTICAL â€” CURRENT manager (as of March 2026), formation, playing style, season objective
 
-Format as bullet points grouped by match. Be concise â€” facts only, no analysis, no intro, no outro.`
+IMPORTANT: Use the 2025/26 season data ONLY. Do not use data from previous seasons.
+
+Format as bullet points grouped by match. Facts only, no analysis, no intro, no outro.`
 
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 55000) // 55s â€” background job, no rush
+            let timedOut = false
+            const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 55000)
 
             const response = await fetch(
-              'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+              'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
               {
                 method: 'POST',
                 signal: controller.signal,
@@ -326,38 +329,62 @@ Format as bullet points grouped by match. Be concise â€” facts only, no ana
                 },
                 body: JSON.stringify({
                   contents: [{ parts: [{ text: prompt }] }],
-                  // NO tools â€” no google_search â€” pure training knowledge = fast
+                  tools: [{ google_search: {} }], // SEARCH GROUNDING â€” gets current data
                   generationConfig: { temperature: 0.1, maxOutputTokens: 8000 },
                 }),
               }
             )
 
-            clearTimeout(timeout)
-
             if (response.ok) {
-              const data = await response.json()
+              let collected = ''
+              const reader = response.body.getReader()
+              const decoder = new TextDecoder()
 
-              if (data.error) {
-                results.context.reason = `Gemini API error: ${data.error.message || JSON.stringify(data.error).slice(0, 150)}`
-              } else {
-                const text = data?.candidates?.[0]?.content?.parts
-                  ?.filter((p) => p.text)
-                  ?.map((p) => p.text)
-                  ?.join('\n')
-
-                if (text && text.length > 100) {
-                  await cacheSet('context:text', text, 108000)
-                  await cacheSet('context:chars', text.length, 108000)
-                  await cacheSet('context:updated_at', new Date().toISOString(), 108000)
-
-                  results.context.refreshed = true
-                  results.context.chars = text.length
-                  results.context.reason = `Refreshed (was ${Math.round(contextAge)}h old)`
-                } else {
-                  results.context.reason = `Gemini returned too little (${text?.length || 0} chars)`
+              try {
+                while (true) {
+                  const { done, value } = await reader.read()
+                  if (done) break
+                  const chunk = decoder.decode(value, { stream: true })
+                  for (const line of chunk.split('\n')) {
+                    if (!line.startsWith('data: ')) continue
+                    const jsonStr = line.slice(6).trim()
+                    if (!jsonStr || jsonStr === '[DONE]') continue
+                    try {
+                      const parsed = JSON.parse(jsonStr)
+                      const parts = parsed?.candidates?.[0]?.content?.parts
+                      if (parts) {
+                        for (const p of parts) {
+                          if (p.text) collected += p.text
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                }
+              } catch (streamErr) {
+                if (streamErr.name !== 'AbortError') {
+                  console.log('Context stream error:', streamErr.message)
                 }
               }
+
+              clearTimeout(timeout)
+
+              if (collected.length > 100) {
+                await cacheSet('context:text', collected, 108000)
+                await cacheSet('context:chars', collected.length, 108000)
+                await cacheSet('context:updated_at', new Date().toISOString(), 108000)
+
+                results.context.refreshed = true
+                results.context.chars = collected.length
+                results.context.reason = timedOut
+                  ? `Partial â€” ${collected.length} chars before timeout`
+                  : `Refreshed (was ${Math.round(contextAge)}h old)`
+              } else {
+                results.context.reason = timedOut
+                  ? `Timed out with only ${collected.length} chars`
+                  : `Too little data (${collected.length} chars)`
+              }
             } else {
+              clearTimeout(timeout)
               const err = await response.text()
               results.context.reason = `Gemini HTTP ${response.status}: ${err.slice(0, 150)}`
             }
