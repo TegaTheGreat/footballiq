@@ -451,7 +451,7 @@ function DataStatusIndicator({ status }) {
           })}
           <div style={{ ...styles.statusRow, borderTop: '1px solid #eee', paddingTop: 6, marginTop: 4 }}>
             <span>🔍</span>
-            <span style={{ flex: 1 }}>Live News <span style={{ fontSize: 10, color: '#999' }}>bonus</span></span>
+            <span style={{ flex: 1 }}>Live Search <span style={{ fontSize: 10, color: '#999' }}>per query</span></span>
             {status.geminiLive?.success ? (
               <span style={{ color: '#27ae60', fontSize: 12 }}>✓ {status.geminiLive.chars} chars</span>
             ) : (
