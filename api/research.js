@@ -93,27 +93,17 @@ export default async function handler(req, res) {
           let timedOut = false
           const timeout = setTimeout(() => { timedOut = true; controller.abort() }, remainingMs - 1000)
 
-          const livePrompt = `You are a football data researcher with Google Search. Today is ${today}. Current season is 2025/26.
+        const livePrompt = `You are a football research assistant with Google Search. Today is ${today}.
 
 The user is asking: "${question}"
 
-Search Google for CURRENT data relevant to this question:
+Think about what football matches are relevant to this question. Search Google and find:
+- What fixtures are coming up this weekend and next week
+- Recent results and current form for the teams involved  
+- Any injury news, suspensions or team news
+- Current league standings for relevant leagues
 
-1. RECENT RESULTS â€” Last 5 match results for each relevant team with actual scores (e.g. Arsenal 3-1 Brighton, March 15 2026)
-2. CURRENT FORM â€” Win/draw/loss streaks, goals scored/conceded recently
-3. UPCOMING FIXTURES â€” Confirmed dates, kick-off times
-4. TEAM NEWS â€” Confirmed injuries, suspensions, returns from injury
-5. HEAD TO HEAD â€” Recent meetings between the teams with scores
-6. LEAGUE POSITION â€” Current standing, points, goal difference
-7. MANAGER & TACTICS â€” Current manager (as of March 2026), formation, style
-
-CRITICAL RULES:
-- Only return facts you actually found via search. NEVER guess or invent a score.
-- If you cannot find a specific result, skip it â€” do not fabricate.
-- Include the date for each result you cite (e.g. "March 15 2026")
-- Focus on the teams/leagues the user is asking about, not everything
-
-Return bullet points only. No intro, no analysis, no outro. Maximum 30 bullet points.`
+Just think naturally and search like a person would. Return bullet points of everything useful you find. Be thorough but concise.`
 
           const response = await fetch(
             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
