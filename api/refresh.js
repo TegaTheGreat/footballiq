@@ -295,7 +295,7 @@ Return ONLY the standings data. No intro, no analysis, no outro. Be accurate â�
             const fixtureLines = oddsText
               .split('\n')
               .filter(line => line.includes(' vs '))
-              .slice(0, 40) // cap at 40 for search-grounded call
+             .slice(0, 20) // cap at 20 — Gemini handles this reliably within 55s
               .join('\n')
 
             const prompt = `You are a football data researcher with Google Search. Today is ${today}. The current season is 2025/26.
