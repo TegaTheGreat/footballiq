@@ -1,17 +1,14 @@
 // =============================================================
-// /api/research.js â€” STAGE 1
-// Reads ALL data from Redis cache (instant)
-// Optional: Gemini live search for breaking news (bonus)
-// Expected time: 1-3 seconds (cache) + bonus if time allows
+// api/research.js — Stage 1: Read cache + live news
 // =============================================================
 
 import { cacheGet } from './_cache.js'
+import { getPredictionStats, getIntelligence } from './db.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -28,13 +25,12 @@ export default async function handler(req, res) {
       geminiLive: { success: false, error: null, chars: 0 },
     }
 
-    // ============================================
-    // READ ALL CACHED DATA IN PARALLEL (instant)
-    // ============================================
+    // Read cache + DB stats in parallel
     const [
       oddsText, oddsTotal, oddsUpdated,
       standingsText, standingsLeagues, standingsUpdated,
       contextText, contextChars, contextUpdated,
+      predStats,
     ] = await Promise.all([
       cacheGet('odds:text'),
       cacheGet('odds:total'),
@@ -45,44 +41,38 @@ export default async function handler(req, res) {
       cacheGet('context:text'),
       cacheGet('context:chars'),
       cacheGet('context:updated_at'),
+      getPredictionStats().catch(() => null),
     ])
 
-    // Odds
-    if (oddsText && oddsTotal) {
+    if (oddsText) {
       status.odds.success = true
       status.odds.fixtures = oddsTotal
       status.odds.age = oddsUpdated ? `${Math.round((Date.now() - new Date(oddsUpdated).getTime()) / 3600000)}h ago` : null
     } else {
-      status.odds.error = 'No cached data â€” visit /api/refresh'
+      status.odds.error = 'No cached data'
     }
 
-    // Standings
-    if (standingsText && standingsLeagues) {
+    if (standingsText) {
       status.standings.success = true
       status.standings.leagues = standingsLeagues
       status.standings.age = standingsUpdated ? `${Math.round((Date.now() - new Date(standingsUpdated).getTime()) / 3600000)}h ago` : null
     } else {
-      status.standings.error = 'No cached data â€” visit /api/refresh'
+      status.standings.error = 'No cached data'
     }
 
-    // Match context
     if (contextText) {
       status.context.success = true
       status.context.chars = contextChars || contextText.length
       status.context.age = contextUpdated ? `${Math.round((Date.now() - new Date(contextUpdated).getTime()) / 3600000)}h ago` : null
     } else {
-      status.context.error = 'No cached data â€” visit /api/refresh'
+      status.context.error = 'No cached data'
     }
 
     const cacheReadTime = Date.now() - startTime
-    console.log(`Cache read: ${cacheReadTime}ms`)
 
-    // ============================================
-    // OPTIONAL: Gemini live search for breaking news
-    // Only fires if question is provided and time allows
-    // ============================================
+    // Optional: Gemini live search for breaking news
     let geminiLiveData = ''
-    const TOTAL_BUDGET = 23000 // 23s â€” gives live search ~20s after cache read
+    const TOTAL_BUDGET = 23000
 
     if (GEMINI_API_KEY && question) {
       const remainingMs = TOTAL_BUDGET - (Date.now() - startTime)
@@ -90,30 +80,26 @@ export default async function handler(req, res) {
       if (remainingMs > 6000) {
         try {
           const controller = new AbortController()
-          let timedOut = false
-          const timeout = setTimeout(() => { timedOut = true; controller.abort() }, remainingMs - 1000)
+          const timeout = setTimeout(() => controller.abort(), remainingMs - 1000)
 
-        const livePrompt = `You are a football research assistant with Google Search. Today is ${today}.
+          const livePrompt = `You are a football research assistant. Today is ${today}.
 
 The user is asking: "${question}"
 
-Think about what football matches are relevant to this question. Search Google and find:
+Think about what football matches are relevant. Search Google and find:
 - What fixtures are coming up this weekend and next week
-- Recent results and current form for the teams involved  
-- Any injury news, suspensions or team news
+- Recent results and current form for the teams involved
+- Any confirmed injury news, suspensions or team news from the last 48 hours
 - Current league standings for relevant leagues
 
-Just think naturally and search like a person would. Return bullet points of everything useful you find. Be thorough but concise.`
+Think naturally. Return bullet points of everything useful you find. Be thorough but concise. Maximum 25 bullet points.`
 
           const response = await fetch(
             'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse',
             {
               method: 'POST',
               signal: controller.signal,
-              headers: {
-                'Content-Type': 'application/json',
-                'x-goog-api-key': GEMINI_API_KEY,
-              },
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: livePrompt }] }],
                 tools: [{ google_search: {} }],
@@ -139,16 +125,12 @@ Just think naturally and search like a person would. Return bullet points of eve
                   try {
                     const parsed = JSON.parse(jsonStr)
                     const parts = parsed?.candidates?.[0]?.content?.parts
-                    if (parts) {
-                      for (const p of parts) {
-                        if (p.text) collected += p.text
-                      }
-                    }
+                    if (parts) for (const p of parts) { if (p.text) collected += p.text }
                   } catch (_) {}
                 }
               }
-            } catch (streamErr) {
-              if (streamErr.name !== 'AbortError') console.log('Live stream error:', streamErr.message)
+            } catch (e) {
+              if (e.name !== 'AbortError') console.log('Live stream error:', e.message)
             }
 
             clearTimeout(timeout)
@@ -157,9 +139,8 @@ Just think naturally and search like a person would. Return bullet points of eve
               geminiLiveData = collected
               status.geminiLive.success = true
               status.geminiLive.chars = collected.length
-              if (timedOut) status.geminiLive.error = `Partial (${collected.length} chars)`
             } else {
-              status.geminiLive.error = timedOut ? 'Timed out, no data' : 'No breaking news found'
+              status.geminiLive.error = 'No live data found'
             }
           } else {
             clearTimeout(timeout)
@@ -169,22 +150,14 @@ Just think naturally and search like a person would. Return bullet points of eve
           status.geminiLive.error = e.name === 'AbortError' ? 'Timed out' : e.message
         }
       } else {
-        status.geminiLive.error = 'Skipped â€” not enough time'
+        status.geminiLive.error = 'Not enough time'
       }
     }
 
-    // ============================================
-    // BUILD COMBINED DATA FOR CLAUDE
-    // ============================================
     let geminiCombined = ''
-    if (contextText) {
-      geminiCombined += '=== MATCH CONTEXT (Form, H2H, Tactics) ===\n' + contextText
-    }
-    if (geminiLiveData) {
-      geminiCombined += '\n\n=== LIVE SEARCH DATA (Current results, form, team news) ===\n' + geminiLiveData
-    }
+    if (contextText) geminiCombined += '=== MATCH CONTEXT ===\n' + contextText
+    if (geminiLiveData) geminiCombined += '\n\n=== LIVE NEWS & BREAKING ===\n' + geminiLiveData
 
-    // Check if cache needs refresh â€” signal to frontend
     const needsRefresh = !oddsText || !standingsText || !contextText
 
     return res.status(200).json({
@@ -193,6 +166,7 @@ Just think naturally and search like a person would. Return bullet points of eve
       cache_read_ms: cacheReadTime,
       needs_refresh: needsRefresh,
       status,
+      predStats,
       data: {
         gemini: geminiCombined,
         odds: { context: oddsText || '', total: oddsTotal || 0 },
@@ -200,7 +174,6 @@ Just think naturally and search like a person would. Return bullet points of eve
       },
     })
   } catch (err) {
-    console.log('Research error:', err.message, err.stack)
     return res.status(500).json({ success: false, error: err.message })
   }
 }
