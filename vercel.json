@@ -1,20 +1,14 @@
 {
-  "name": "footballiq",
-  "version": "2.1.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+  "functions": {
+    "api/refresh.js": { "maxDuration": 60 },
+    "api/research.js": { "maxDuration": 25 },
+    "api/predict.js": { "maxDuration": 60 },
+    "api/setup.js": { "maxDuration": 30 }
   },
-  "dependencies": {
-    "@vercel/postgres": "^0.10.0",
-    "lucide-react": "^0.383.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.0.3",
-    "vite": "^4.4.5"
-  }
+  "crons": [
+    {
+      "path": "/api/refresh",
+      "schedule": "0 7 * * *"
+    }
+  ]
 }
