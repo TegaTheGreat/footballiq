@@ -1,7 +1,9 @@
 // =============================================================
 // api/scout.js — Gemini reads live websites for match data
-// No API keys for football data needed — Gemini scrapes directly
+// No football APIs needed
 // =============================================================
+
+import { saveIntelligence } from './db.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -17,64 +19,72 @@ export default async function handler(req, res) {
     const { question } = req.body
     const now = new Date()
     const today = now.toISOString().split('T')[0]
-    const dayName = now.toLocaleDateString('en-GB', { weekday: 'long' })
-    const fullDate = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    const fullDate = now.toLocaleDateString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+    })
 
-    const scoutPrompt = `You are an elite football data scout with the ability to browse the live internet. Today is ${fullDate} (${today}).
+    const scoutPrompt = `You are an elite football data scout. Today is ${fullDate}.
 
 The user wants: "${question}"
 
-Your job is to find REAL, LIVE football data right now by searching these specific sources:
+Browse the internet RIGHT NOW and find real, live football data. Use these sources:
 
-STEP 1 — Find upcoming fixtures and recent results:
-Search and read: "flashscore football fixtures ${today}"
-Search and read: "bbc sport football scores results today"
-Search and read: "premier league fixtures this weekend" if relevant
-Search and read: "champions league fixtures this week" if relevant
-Search and read: the specific competition the user is asking about
+FIXTURES & RESULTS — search and read:
+- flashscore.com for today and this weekend's fixtures
+- bbc.co.uk/sport/football for latest scores and results
+- sofascore.com for upcoming fixtures
+- the specific competition the user mentioned
 
-STEP 2 — For each relevant match you find, search for:
-- "[Team A] vs [Team B] preview odds ${today}"
-- "[Team A] form last 5 matches results"
-- "[Team B] form last 5 matches results"
-- "[Team A] injury news team news"
-- "[Team A] vs [Team B] head to head"
+ODDS — search and read:
+- oddschecker.com for the specific matches you find
+- Search "[Team A] vs [Team B] betting odds" for each match
+- Find Over/Under odds, BTTS odds, Asian Handicap odds
 
-STEP 3 — Find current odds:
-Search: "oddschecker [Team A] vs [Team B]"
-Search: "[Team A] vs [Team B] betting odds over under btts"
+FORM & STATS — search and read:
+- "[Team] last 5 results 2025-26"
+- "[Team A] vs [Team B] head to head history"
+- whoscored.com or fbref.com for team stats
 
-STEP 4 — Find league standings if relevant:
-Search: "[League name] standings table 2025-26"
+INJURY NEWS — search and read:
+- "[Team] injury news team news [current month year]"
+- bbc sport or sky sports for confirmed absences
 
-RETURN everything you find in this exact structured format — REAL DATA ONLY, nothing invented:
+STANDINGS — search and read:
+- "[League] table standings 2025-26"
 
-=== FIXTURES FOUND ===
-- [Date/Time] [Home Team] vs [Away Team] ([League])
+Return ONLY real data you found. Structure it exactly like this:
+
+=== FIXTURES ===
+[Date Time] [Home] vs [Away] ([League/Competition])
 
 === RECENT RESULTS (last 7 days) ===
-- [Date] [Home Team] [Score] [Away Team] ([League])
+[Date] [Home] [Score] [Away]
 
-=== TEAM FORM ===
-- [Team]: [Last 5 results as W/D/L with scores]
-- [Team]: [Last 5 results as W/D/L with scores]
+=== ODDS ===
+[Home] vs [Away]:
+- Match Result: Home [x.xx] | Draw [x.xx] | Away [x.xx]
+- Over 2.5 Goals: [x.xx] | Under 2.5: [x.xx]
+- Over 1.5 Goals: [x.xx]
+- BTTS Yes: [x.xx] | No: [x.xx]
+- Asian Handicap: Home -0.5 [x.xx] | Away -0.5 [x.xx]
+
+=== FORM ===
+[Team]: [Last 5 — e.g. W3-1 D1-1 L0-2 W2-0 W1-0]
 
 === HEAD TO HEAD ===
-- [Team A] vs [Team B]: [Last 3 results with scores and dates]
-
-=== LIVE ODDS ===
-- [Home Team] vs [Away Team]: Win [x.xx] / Draw [x.xx] / Win [x.xx] | Over 2.5: [x.xx] | BTTS Yes: [x.xx]
+[Team A] vs [Team B]: [Last 3 results with dates and scores]
 
 === INJURIES & SUSPENSIONS ===
-- [Team]: [Player] — [injury/suspension, expected return]
+[Team]: [Player] — [status, expected return]
 
 === STANDINGS ===
-- [League]: [Position]. [Team] [Points]pts [Form]
+[League]:
+1. [Team] [Pts]pts W[w] D[d] L[l] GD[gd] Form:[last5]
 
-=== KEY MATCH INTELLIGENCE ===
-- [Any tactical, motivational or context notes you found]
+=== MATCH INTELLIGENCE ===
+[Tactical notes, motivation factors, managerial comments, anything relevant]
 
-Be thorough. Read multiple pages. Only return data you actually found on real websites. If you cannot find something, say "Not found" for that section rather than inventing data.`
+Be thorough. Read multiple pages. If you cannot find something say "Not found" — never invent data.`
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 55000)
@@ -91,10 +101,7 @@ Be thorough. Read multiple pages. Only return data you actually found on real we
         body: JSON.stringify({
           contents: [{ parts: [{ text: scoutPrompt }] }],
           tools: [{ google_search: {} }],
-          generationConfig: {
-            temperature: 0.05,
-            maxOutputTokens: 4000,
-          },
+          generationConfig: { temperature: 0.05, maxOutputTokens: 4000 },
         }),
       }
     )
@@ -103,14 +110,11 @@ Be thorough. Read multiple pages. Only return data you actually found on real we
       clearTimeout(timeout)
       const errText = await response.text()
       return res.status(200).json({
-        success: false,
-        data: '',
-        error: `Gemini HTTP ${response.status}: ${errText.slice(0, 200)}`,
-        elapsed_ms: 0,
+        success: false, data: '',
+        error: `Gemini ${response.status}: ${errText.slice(0, 200)}`,
       })
     }
 
-    const startRead = Date.now()
     let collected = ''
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -137,25 +141,22 @@ Be thorough. Read multiple pages. Only return data you actually found on real we
 
     clearTimeout(timeout)
 
-    const elapsed = Date.now() - startRead
-    const hasData = collected.length > 100 && !collected.includes('Not found') && collected.includes('===')
+    const hasData = collected.length > 200 && collected.includes('===')
 
-    console.log(`Scout: ${collected.length} chars in ${elapsed}ms`)
+    // Save to DB for future reference
+    if (hasData) {
+      await saveIntelligence('scout', 'all', null, collected, today).catch(() => {})
+    }
+
+    console.log(`Scout: ${collected.length} chars, hasData: ${hasData}`)
 
     return res.status(200).json({
       success: hasData,
       data: collected,
       chars: collected.length,
-      elapsed_ms: elapsed,
     })
 
   } catch (err) {
-    console.log('Scout error:', err.message)
-    return res.status(200).json({
-      success: false,
-      data: '',
-      error: err.message,
-      elapsed_ms: 0,
-    })
+    return res.status(200).json({ success: false, data: '', error: err.message })
   }
 }
