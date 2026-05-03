@@ -1,14 +1,6 @@
 {
   "functions": {
-    "api/refresh.js": { "maxDuration": 60 },
-    "api/research.js": { "maxDuration": 25 },
-    "api/predict.js": { "maxDuration": 60 },
-    "api/setup.js": { "maxDuration": 30 }
-  },
-  "crons": [
-    {
-      "path": "/api/refresh",
-      "schedule": "0 7 * * *"
-    }
-  ]
+    "api/scout.js": { "maxDuration": 60 },
+    "api/predict.js": { "maxDuration": 60 }
+  }
 }
