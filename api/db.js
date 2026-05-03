@@ -1,21 +1,49 @@
 // =============================================================
 // api/db.js — Vercel Postgres database layer
-// Run setupDatabase() once to create all tables
+// Stores predictions, results, intelligence, ELO ratings
 // =============================================================
 
 import { sql } from '@vercel/postgres'
-
 export { sql }
 
 export async function setupDatabase() {
-  // Teams table — ELO ratings, persistent stats
+  await sql`
+    CREATE TABLE IF NOT EXISTS predictions (
+      id SERIAL PRIMARY KEY,
+      match_date DATE,
+      home_team VARCHAR(100) NOT NULL,
+      away_team VARCHAR(100) NOT NULL,
+      league VARCHAR(100),
+      market VARCHAR(100) NOT NULL,
+      pick VARCHAR(200) NOT NULL,
+      confidence INT,
+      odds FLOAT,
+      result VARCHAR(20) DEFAULT 'pending',
+      actual_score VARCHAR(20),
+      resolved_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS intelligence (
+      id SERIAL PRIMARY KEY,
+      intel_type VARCHAR(50) NOT NULL,
+      league VARCHAR(100),
+      team VARCHAR(100),
+      content TEXT NOT NULL,
+      match_date DATE,
+      source VARCHAR(100) DEFAULT 'gemini',
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `
+
   await sql`
     CREATE TABLE IF NOT EXISTS teams (
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL UNIQUE,
       league VARCHAR(100),
       elo_rating FLOAT DEFAULT 1500,
-      matches_played INT DEFAULT 0,
       wins INT DEFAULT 0,
       draws INT DEFAULT 0,
       losses INT DEFAULT 0,
@@ -25,159 +53,67 @@ export async function setupDatabase() {
     )
   `
 
-  // Matches table — historical results
-  await sql`
-    CREATE TABLE IF NOT EXISTS matches (
-      id SERIAL PRIMARY KEY,
-      home_team VARCHAR(100) NOT NULL,
-      away_team VARCHAR(100) NOT NULL,
-      league VARCHAR(100),
-      match_date DATE,
-      home_goals INT,
-      away_goals INT,
-      result CHAR(1),
-      home_elo_before FLOAT,
-      away_elo_before FLOAT,
-      home_odds FLOAT,
-      draw_odds FLOAT,
-      away_odds FLOAT,
-      over25_odds FLOAT,
-      btts_yes_odds FLOAT,
-      created_at TIMESTAMP DEFAULT NOW()
-    )
-  `
-
-  // Predictions table — every Claude prediction
-  await sql`
-    CREATE TABLE IF NOT EXISTS predictions (
-      id SERIAL PRIMARY KEY,
-      match_date DATE,
-      home_team VARCHAR(100) NOT NULL,
-      away_team VARCHAR(100) NOT NULL,
-      league VARCHAR(100),
-      market VARCHAR(50) NOT NULL,
-      pick VARCHAR(100) NOT NULL,
-      confidence INT,
-      odds FLOAT,
-      result VARCHAR(20) DEFAULT 'pending',
-      actual_outcome VARCHAR(100),
-      created_at TIMESTAMP DEFAULT NOW(),
-      resolved_at TIMESTAMP
-    )
-  `
-
-  // Intelligence table — Gemini daily research stored permanently
-  await sql`
-    CREATE TABLE IF NOT EXISTS intelligence (
-      id SERIAL PRIMARY KEY,
-      intel_type VARCHAR(50) NOT NULL,
-      league VARCHAR(100),
-      team VARCHAR(100),
-      content TEXT NOT NULL,
-      source VARCHAR(100) DEFAULT 'gemini',
-      match_date DATE,
-      created_at TIMESTAMP DEFAULT NOW()
-    )
-  `
-
-  // Odds snapshots — historical odds for backtesting
-  await sql`
-    CREATE TABLE IF NOT EXISTS odds_snapshots (
-      id SERIAL PRIMARY KEY,
-      home_team VARCHAR(100) NOT NULL,
-      away_team VARCHAR(100) NOT NULL,
-      league VARCHAR(100),
-      match_date DATE,
-      market VARCHAR(50),
-      home_odds FLOAT,
-      draw_odds FLOAT,
-      away_odds FLOAT,
-      over15_odds FLOAT,
-      over25_odds FLOAT,
-      over35_odds FLOAT,
-      btts_yes_odds FLOAT,
-      btts_no_odds FLOAT,
-      asian_handicap_home FLOAT,
-      asian_handicap_away FLOAT,
-      first_half_home FLOAT,
-      first_half_draw FLOAT,
-      first_half_away FLOAT,
-      snapshot_at TIMESTAMP DEFAULT NOW()
-    )
-  `
-
-  console.log('Database setup complete')
+  console.log('Database ready')
 }
 
-// ELO calculation
-export function calculateElo(homeRating, awayRating, homeGoals, awayGoals, k = 32) {
-  const homeAdv = 65
-  const expectedHome = 1 / (1 + Math.pow(10, (awayRating - (homeRating + homeAdv)) / 400))
-  const expectedAway = 1 - expectedHome
-
-  let actualHome, actualAway
-  if (homeGoals > awayGoals) { actualHome = 1; actualAway = 0 }
-  else if (homeGoals < awayGoals) { actualHome = 0; actualAway = 1 }
-  else { actualHome = 0.5; actualAway = 0.5 }
-
-  const goalDiff = Math.abs(homeGoals - awayGoals)
-  const margin = Math.log(goalDiff + 1) * 1.0
-
-  const newHomeRating = homeRating + k * margin * (actualHome - expectedHome)
-  const newAwayRating = awayRating + k * margin * (actualAway - expectedAway)
-
-  return { newHomeRating, newAwayRating, expectedHome, expectedAway }
-}
-
-// Save prediction to DB
-export async function savePrediction(prediction) {
+// -------------------------------------------------------
+// PREDICTIONS
+// -------------------------------------------------------
+export async function savePrediction(pred) {
   try {
     await sql`
-      INSERT INTO predictions (match_date, home_team, away_team, league, market, pick, confidence, odds)
-      VALUES (${prediction.match_date}, ${prediction.home_team}, ${prediction.away_team},
-              ${prediction.league}, ${prediction.market}, ${prediction.pick},
-              ${prediction.confidence}, ${prediction.odds})
+      INSERT INTO predictions
+        (match_date, home_team, away_team, league, market, pick, confidence, odds)
+      VALUES
+        (${pred.match_date}, ${pred.home_team}, ${pred.away_team},
+         ${pred.league}, ${pred.market}, ${pred.pick},
+         ${pred.confidence || null}, ${pred.odds || null})
     `
   } catch (e) {
     console.log('savePrediction error:', e.message)
   }
 }
 
-// Get prediction history + win rates
 export async function getPredictionStats() {
   try {
-    const total = await sql`SELECT COUNT(*) as count FROM predictions`
-    const won = await sql`SELECT COUNT(*) as count FROM predictions WHERE result = 'won'`
-    const lost = await sql`SELECT COUNT(*) as count FROM predictions WHERE result = 'lost'`
-    const pending = await sql`SELECT COUNT(*) as count FROM predictions WHERE result = 'pending'`
+    const [totals, byMarket, recent] = await Promise.all([
+      sql`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN result = 'won' THEN 1 ELSE 0 END) as won,
+          SUM(CASE WHEN result = 'lost' THEN 1 ELSE 0 END) as lost,
+          SUM(CASE WHEN result = 'pending' THEN 1 ELSE 0 END) as pending
+        FROM predictions
+      `,
+      sql`
+        SELECT market,
+          COUNT(*) as total,
+          SUM(CASE WHEN result = 'won' THEN 1 ELSE 0 END) as wins,
+          SUM(CASE WHEN result = 'lost' THEN 1 ELSE 0 END) as losses
+        FROM predictions
+        WHERE result != 'pending'
+        GROUP BY market
+        ORDER BY wins DESC
+        LIMIT 8
+      `,
+      sql`
+        SELECT * FROM predictions
+        ORDER BY created_at DESC
+        LIMIT 10
+      `
+    ])
 
-    const byMarket = await sql`
-      SELECT market,
-        COUNT(*) as total,
-        SUM(CASE WHEN result = 'won' THEN 1 ELSE 0 END) as wins,
-        SUM(CASE WHEN result = 'lost' THEN 1 ELSE 0 END) as losses
-      FROM predictions
-      WHERE result != 'pending'
-      GROUP BY market
-      ORDER BY wins DESC
-    `
-
-    const recent = await sql`
-      SELECT * FROM predictions
-      ORDER BY created_at DESC
-      LIMIT 20
-    `
+    const t = totals.rows[0]
+    const resolved = parseInt(t.won) + parseInt(t.lost)
 
     return {
-      total: total.rows[0].count,
-      won: won.rows[0].count,
-      lost: lost.rows[0].count,
-      pending: pending.rows[0].count,
-      winRate: total.rows[0].count > 0
-        ? Math.round((won.rows[0].count / (won.rows[0].count + lost.rows[0].count || 1)) * 100)
-        : 0,
+      total: parseInt(t.total),
+      won: parseInt(t.won),
+      lost: parseInt(t.lost),
+      pending: parseInt(t.pending),
+      winRate: resolved > 0 ? Math.round((parseInt(t.won) / resolved) * 100) : 0,
       byMarket: byMarket.rows,
-      recent: recent.rows
+      recent: recent.rows,
     }
   } catch (e) {
     console.log('getPredictionStats error:', e.message)
@@ -185,7 +121,54 @@ export async function getPredictionStats() {
   }
 }
 
-// Save intelligence entry
+export async function resolvePendingPredictions(results) {
+  // results = [{ home_team, away_team, home_goals, away_goals }]
+  for (const r of results) {
+    try {
+      const pending = await sql`
+        SELECT * FROM predictions
+        WHERE result = 'pending'
+        AND home_team ILIKE ${'%' + r.home_team + '%'}
+        AND away_team ILIKE ${'%' + r.away_team + '%'}
+      `
+
+      for (const pred of pending.rows) {
+        const hg = r.home_goals
+        const ag = r.away_goals
+        const total = hg + ag
+        let outcome = 'lost'
+
+        const pick = pred.pick.toLowerCase()
+        if (pick.includes('home win') && hg > ag) outcome = 'won'
+        else if (pick.includes('away win') && ag > hg) outcome = 'won'
+        else if (pick.includes('draw') && hg === ag) outcome = 'won'
+        else if (pick.includes('over 2.5') && total > 2.5) outcome = 'won'
+        else if (pick.includes('under 2.5') && total < 2.5) outcome = 'won'
+        else if (pick.includes('over 1.5') && total > 1.5) outcome = 'won'
+        else if (pick.includes('over 3.5') && total > 3.5) outcome = 'won'
+        else if (pick.includes('btts yes') && hg > 0 && ag > 0) outcome = 'won'
+        else if (pick.includes('btts no') && (hg === 0 || ag === 0)) outcome = 'won'
+        else if (pick.includes('1x') && (hg >= ag)) outcome = 'won'
+        else if (pick.includes('x2') && (ag >= hg)) outcome = 'won'
+        else if (pick.includes('12') && hg !== ag) outcome = 'won'
+
+        await sql`
+          UPDATE predictions
+          SET result = ${outcome},
+              actual_score = ${hg + '-' + ag},
+              resolved_at = NOW()
+          WHERE id = ${pred.id}
+        `
+      }
+    } catch (e) {
+      console.log('resolve error:', e.message)
+    }
+  }
+}
+
+// -------------------------------------------------------
+// INTELLIGENCE
+// -------------------------------------------------------
 export async function saveIntelligence(type, league, team, content, matchDate = null) {
   try {
     await sql`
@@ -197,34 +180,13 @@ export async function saveIntelligence(type, league, team, content, matchDate = 
   }
 }
 
-// Get recent intelligence for a team or league
-export async function getIntelligence(league = null, team = null, days = 14) {
+export async function getRecentIntelligence(days = 14) {
   try {
-    if (team) {
-      const result = await sql`
-        SELECT * FROM intelligence
-        WHERE team = ${team}
-        AND created_at > NOW() - INTERVAL '${days} days'
-        ORDER BY created_at DESC
-        LIMIT 10
-      `
-      return result.rows
-    }
-    if (league) {
-      const result = await sql`
-        SELECT * FROM intelligence
-        WHERE league = ${league}
-        AND created_at > NOW() - INTERVAL '${days} days'
-        ORDER BY created_at DESC
-        LIMIT 20
-      `
-      return result.rows
-    }
     const result = await sql`
       SELECT * FROM intelligence
-      WHERE created_at > NOW() - INTERVAL '${days} days'
+      WHERE created_at > NOW() - (${days} || ' days')::INTERVAL
       ORDER BY created_at DESC
-      LIMIT 50
+      LIMIT 30
     `
     return result.rows
   } catch (e) {
@@ -233,21 +195,72 @@ export async function getIntelligence(league = null, team = null, days = 14) {
   }
 }
 
-// Save odds snapshot
-export async function saveOddsSnapshot(fixture) {
+// -------------------------------------------------------
+// ELO
+// -------------------------------------------------------
+export async function updateTeamElo(homeTeam, awayTeam, homeGoals, awayGoals, league) {
   try {
+    const homeRow = await sql`SELECT * FROM teams WHERE name = ${homeTeam}`
+    const awayRow = await sql`SELECT * FROM teams WHERE name = ${awayTeam}`
+
+    const homeElo = homeRow.rows[0]?.elo_rating || 1500
+    const awayElo = awayRow.rows[0]?.elo_rating || 1500
+
+    const K = 32
+    const homeAdv = 65
+    const expected = 1 / (1 + Math.pow(10, (awayElo - (homeElo + homeAdv)) / 400))
+    const actual = homeGoals > awayGoals ? 1 : homeGoals === awayGoals ? 0.5 : 0
+    const goalDiff = Math.abs(homeGoals - awayGoals)
+    const margin = Math.log(goalDiff + 1)
+
+    const newHome = homeElo + K * margin * (actual - expected)
+    const newAway = awayElo + K * margin * ((1 - actual) - (1 - expected))
+
     await sql`
-      INSERT INTO odds_snapshots (
-        home_team, away_team, league, match_date,
-        home_odds, draw_odds, away_odds,
-        over25_odds, btts_yes_odds
-      ) VALUES (
-        ${fixture.home_team}, ${fixture.away_team}, ${fixture.league}, ${fixture.match_date},
-        ${fixture.home_odds}, ${fixture.draw_odds}, ${fixture.away_odds},
-        ${fixture.over25_odds}, ${fixture.btts_yes_odds}
-      )
+      INSERT INTO teams (name, league, elo_rating, wins, draws, losses, goals_for, goals_against)
+      VALUES (${homeTeam}, ${league}, ${newHome},
+        ${homeGoals > awayGoals ? 1 : 0},
+        ${homeGoals === awayGoals ? 1 : 0},
+        ${homeGoals < awayGoals ? 1 : 0},
+        ${homeGoals}, ${awayGoals})
+      ON CONFLICT (name) DO UPDATE SET
+        elo_rating = ${newHome},
+        wins = teams.wins + ${homeGoals > awayGoals ? 1 : 0},
+        draws = teams.draws + ${homeGoals === awayGoals ? 1 : 0},
+        losses = teams.losses + ${homeGoals < awayGoals ? 1 : 0},
+        goals_for = teams.goals_for + ${homeGoals},
+        goals_against = teams.goals_against + ${awayGoals},
+        updated_at = NOW()
+    `
+
+    await sql`
+      INSERT INTO teams (name, league, elo_rating, wins, draws, losses, goals_for, goals_against)
+      VALUES (${awayTeam}, ${league}, ${newAway},
+        ${awayGoals > homeGoals ? 1 : 0},
+        ${awayGoals === homeGoals ? 1 : 0},
+        ${awayGoals < homeGoals ? 1 : 0},
+        ${awayGoals}, ${homeGoals})
+      ON CONFLICT (name) DO UPDATE SET
+        elo_rating = ${newAway},
+        wins = teams.wins + ${awayGoals > homeGoals ? 1 : 0},
+        draws = teams.draws + ${awayGoals === homeGoals ? 1 : 0},
+        losses = teams.losses + ${awayGoals < homeGoals ? 1 : 0},
+        goals_for = teams.goals_for + ${awayGoals},
+        goals_against = teams.goals_against + ${homeGoals},
+        updated_at = NOW()
     `
   } catch (e) {
-    console.log('saveOddsSnapshot error:', e.message)
+    console.log('updateTeamElo error:', e.message)
+  }
+}
+
+export async function getTeamElo(teamName) {
+  try {
+    const result = await sql`
+      SELECT * FROM teams WHERE name ILIKE ${'%' + teamName + '%'}
+    `
+    return result.rows[0] || null
+  } catch (e) {
+    return null
   }
 }
