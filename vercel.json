@@ -1,6 +1,14 @@
 {
   "functions": {
     "api/scout.js": { "maxDuration": 60 },
-    "api/predict.js": { "maxDuration": 60 }
-  }
+    "api/predict.js": { "maxDuration": 60 },
+    "api/resolve.js": { "maxDuration": 60 },
+    "api/setup.js": { "maxDuration": 30 }
+  },
+  "crons": [
+    {
+      "path": "/api/resolve",
+      "schedule": "0 8 * * *"
+    }
+  ]
 }
