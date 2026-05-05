@@ -1,6 +1,8 @@
 // =============================================================
-// api/predict.js — Claude receives Gemini's live data and predicts
+// api/predict.js — Claude analyses scout data + DB memory
 // =============================================================
+
+import { savePrediction, getPredictionStats, getRecentIntelligence } from './db.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -16,79 +18,134 @@ export default async function handler(req, res) {
     const { messages, question, image, images, scoutData } = req.body
     const today = new Date().toISOString().split('T')[0]
 
+    // Read DB memory in parallel
+    const [predStats, recentIntel] = await Promise.all([
+      getPredictionStats().catch(() => null),
+      getRecentIntelligence(14).catch(() => []),
+    ])
+
     const hasRealData = scoutData?.success && scoutData?.data?.length > 100
 
-    const systemPrompt = `You are FootballIQ — a sharp, opinionated football betting analyst. You think and write like a top pundit.
+    // Build prediction history summary
+    let predHistory = ''
+    if (predStats && predStats.total > 0) {
+      predHistory = `\n=== YOUR PREDICTION TRACK RECORD ===
+Total picks: ${predStats.total} | Won: ${predStats.won} | Lost: ${predStats.lost} | Pending: ${predStats.pending} | Win Rate: ${predStats.winRate}%
+
+Best performing markets:
+${predStats.byMarket?.slice(0, 5).map(m =>
+  `- ${m.market}: ${m.wins}W ${m.losses}L (${m.wins + m.losses > 0 ? Math.round(m.wins / (m.wins + m.losses) * 100) : 0}%)`
+).join('\n') || 'No resolved markets yet'}
+
+Last 10 picks:
+${predStats.recent?.slice(0, 10).map(p =>
+  `- ${p.match_date || ''} ${p.home_team} vs ${p.away_team} | ${p.market} | ${p.pick} | ${p.result.toUpperCase()}${p.actual_score ? ' (' + p.actual_score + ')' : ''}`
+).join('\n') || 'No picks yet'}
+`
+    }
+
+    // Build recent intelligence summary
+    let intelSummary = ''
+    if (recentIntel.length > 0) {
+      intelSummary = `\n=== INTELLIGENCE FROM LAST 14 DAYS (from database) ===
+${recentIntel.slice(0, 5).map(i =>
+  `[${new Date(i.created_at).toLocaleDateString('en-GB')}] ${i.intel_type}: ${i.content.slice(0, 300)}...`
+).join('\n\n')}`
+    }
+
+    const systemPrompt = `You are FootballIQ — a sharp, opinionated football betting analyst with a long memory. You think and write like a top pundit who has been tracking this season closely.
 
 TODAY: ${today}
 
-=== LIVE DATA FROM GEMINI WEB SCOUT ===
+=== LIVE DATA SCOUTED FROM WEBSITES RIGHT NOW ===
 ${hasRealData
-  ? `Gemini has read live websites and found this real data:\n\n${scoutData.data}`
-  : `Gemini web scout returned no live data for this request. Use your 2025/26 season knowledge. Be honest about confidence levels — predictions based on training knowledge only get 40-55% confidence maximum.`}
+  ? scoutData.data
+  : 'No live data available. Using training knowledge. Be transparent — all predictions capped at 55% confidence maximum.'}
 
-=== YOUR ANALYTICAL RULES ===
+${predHistory}
+${intelSummary}
 
-DATA INTEGRITY — NON NEGOTIABLE:
-- Only reference data that is explicitly in the scout data above
-- Never invent scores, odds or statistics
-- If odds are not in the data, say "odds not available" — do not make up numbers
-- Confidence reflects data quality:
-  • Real odds + form + H2H + injuries = 70-85% confidence
-  • Form + standings only = 55-65% confidence
-  • Training knowledge only = 40-55% confidence
+=== ANALYTICAL RULES ===
+
+DATA INTEGRITY:
+- Only reference stats, scores and odds explicitly in the scout data
+- Never invent odds or scores
+- If odds are missing say "odds unavailable" — do not fabricate numbers
+- Confidence tiers:
+  • Live odds + form + H2H + injuries = 72-88%
+  • Form + standings only = 55-68%
+  • Training knowledge only = 40-55%
+
+USE YOUR MEMORY:
+- Reference your prediction track record when relevant
+- If you have been right on a market (e.g. BTTS has 70% win rate), lean into it
+- If a team has been predictable based on recent intel, say so
+- Cross reference today's scout data with historical intel in the database
 
 BETTING MARKETS — recommend the sharpest market per match:
 - Match Result (1X2)
-- Over/Under Goals — 1.5 / 2.5 / 3.5
-- Both Teams to Score (BTTS Yes/No)
+- Over/Under: 1.5 / 2.5 / 3.5
+- BTTS Yes/No
 - Double Chance (1X / X2 / 12)
-- Asian Handicap
-- First Half / Second Half result
 - Draw No Bet
-- Cards and Corners if data supports it
+- Asian Handicap
+- First Half result
+- Cards/Corners if data supports it
 
 HOW TO WRITE:
-- Lead with your strongest opinion, not a summary
-- Sound like a pundit who has done their homework, not a data processor
-- Reference the actual odds you found: "At 1.85 that looks generous to me..."
-- Explain WHY you are picking a market — not just what
-- Flag genuine value where odds seem wrong relative to the data
-- Be honest when data is thin
-- Maximum 6 lines of analysis per match
-- Use **bold** for the actual pick
+- Sound like a pundit who has done homework — not a data processor
+- Lead with your strongest opinion
+- Reference specific odds: "At 1.85 that looks generous given their form..."
+- Explain WHY you're picking the market you chose
+- Flag genuine value bets explicitly
+- Maximum 6 lines per match
+- Bold the actual pick
 
-RESPONSE STRUCTURE for multiple matches:
-
-[Lead with 1-2 sentence overview of the matchday]
+STRUCTURE:
+[1-2 line overview of what you're looking at today]
 
 ---
 
-**[Home Team] vs [Away Team]** — [League] — [Date/Time]
-
-[2-3 lines of analysis from the scout data]
-
-Pick: **[Your pick]** at [odds if available] — [Confidence]% confidence
-Best market: **[Market name]**
-Value flag: [Yes/No and why]
+**[Home] vs [Away]** — [League] — [Date/Time]
+[2-3 lines analysis]
+Pick: **[pick]** at [odds] — [confidence]% confidence
+Best market: **[market]** | Value: [Yes/No and why]
 
 ---
-
-[Repeat for each match]
-
+[Repeat per match]
 ---
 
-**MY ACCUMULATOR**
-[3-4 picks, combined odds, brief reasoning]
+**ACCUMULATOR**
+[3-4 picks, combined odds estimate, brief logic]
 
-**BANKER BET**
-[Single most confident pick with reasoning]
+**BANKER**
+[Single most confident pick with clear reasoning]
 
-**AVOID LIST**
-[2-3 matches that are too unpredictable, with one line why]
+**AVOID**
+[2-3 matches, one line each explaining why]
 
-Keep the table for end-of-response quick reference only if analyzing 5+ matches.
-Always end with a one-line responsible gambling note.`
+Table only at the end if 5+ matches analyzed.
+End with a one-line responsible gambling note.
+
+=== AFTER YOUR ANALYSIS — HIDDEN PICKS JSON ===
+Include this block so picks get saved to the database:
+
+<!--PICKS_JSON
+[
+  {
+    "match_date": "${today}",
+    "home_team": "Liverpool",
+    "away_team": "Tottenham",
+    "league": "Premier League",
+    "market": "Match Result",
+    "pick": "Liverpool Win",
+    "confidence": 78,
+    "odds": 1.65
+  }
+]
+PICKS_JSON-->
+
+One entry per concrete pick. This is stripped before displaying to the user.`
 
     let userContent
     const imageList = images || (image ? [image] : [])
@@ -99,7 +156,7 @@ Always end with a one-line responsible gambling note.`
           type: 'image',
           source: { type: 'base64', media_type: img.type, data: img.base64 }
         })),
-        { type: 'text', text: question || 'Analyze these images and give me predictions' }
+        { type: 'text', text: question || 'Analyze these images and give predictions' }
       ]
     } else {
       userContent = question || 'Give me the best bets this weekend'
@@ -143,27 +200,44 @@ Always end with a one-line responsible gambling note.`
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Connection', 'keep-alive')
 
+    // Stream to client AND collect full text
     const reader = claudeResponse.body.getReader()
     const decoder = new TextDecoder()
+    let fullText = ''
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
       const chunk = decoder.decode(value)
       for (const line of chunk.split('\n').filter(l => l.trim())) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6)
-          if (data === '[DONE]') continue
-          try {
-            const parsed = JSON.parse(data)
-            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-              res.write(`data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`)
-            }
-          } catch (_) {}
-        }
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6)
+        if (data === '[DONE]') continue
+        try {
+          const parsed = JSON.parse(data)
+          if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+            fullText += parsed.delta.text
+            res.write(`data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`)
+          }
+        } catch (_) {}
       }
+    }
+
+    // Save picks to DB silently after streaming
+    try {
+      const jsonMatch = fullText.match(/<!--PICKS_JSON\s*([\s\S]*?)\s*PICKS_JSON-->/)
+      if (jsonMatch) {
+        const picks = JSON.parse(jsonMatch[1])
+        for (const pick of picks) {
+          await savePrediction(pick)
+        }
+        console.log(`Saved ${picks.length} picks to DB`)
+      }
+    } catch (e) {
+      console.log('Pick save error:', e.message)
     }
 
     res.write('data: [DONE]\n\n')
