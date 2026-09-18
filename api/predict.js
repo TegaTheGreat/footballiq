@@ -1,8 +1,10 @@
 // =============================================================
-// api/predict.js — Claude analyses scout data + DB memory
+// api/predict.js — Claude analyses CACHED weekend scout data
+// (falls back to a live scout.js call only if nothing is cached
+// yet for the current weekend window)
 // =============================================================
 
-import { savePrediction, getPredictionStats, getRecentIntelligence } from './db.js'
+import { savePrediction, getPredictionStats, getWeekendScoutData, getWeekendKey } from './db.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -15,18 +17,62 @@ export default async function handler(req, res) {
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
     if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set' })
 
-    const { messages, question, image, images, scoutData } = req.body
+    const { messages, question, image, images } = req.body
     const today = new Date().toISOString().split('T')[0]
+    const weekendKey = getWeekendKey()
 
-    // Read DB memory in parallel
-    const [predStats, recentIntel] = await Promise.all([
+    const [predStats, weekendRows] = await Promise.all([
       getPredictionStats().catch(() => null),
-      getRecentIntelligence(14).catch(() => []),
+      getWeekendScoutData(weekendKey).catch(() => []),
     ])
 
-    const hasRealData = scoutData?.success && scoutData?.data?.length > 100
+    // Group cached rows by league
+    const byLeague = {}
+    for (const row of weekendRows) {
+      if (!byLeague[row.league]) byLeague[row.league] = {}
+      byLeague[row.league][row.intel_type] = row.content
+    }
+    const coveredLeagues = Object.keys(byLeague)
+    const usingCache = coveredLeagues.length > 0
 
-    // Build prediction history summary
+    let scoutContext = ''
+    let dataSourceNote = ''
+
+    if (usingCache) {
+      scoutContext = coveredLeagues
+        .map(league => {
+          const entry = byLeague[league]
+          let block = `\n### ${league}\n`
+          if (entry.weekend_scout) block += entry.weekend_scout
+          if (entry.injury_news) block += `\n${entry.injury_news}`
+          return block
+        })
+        .join('\n')
+      dataSourceNote = `Cached from this week's scheduled scout run (weekend key: ${weekendKey}). Covers: ${coveredLeagues.join(', ')}.`
+    } else {
+      // Safety net: nothing cached yet for this window (first deploy,
+      // or a question asked before Friday's job has run). Do ONE live
+      // scout as a fallback rather than answering with nothing.
+      try {
+        const base = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''
+        const scoutRes = await fetch(`${base}/api/scout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question }),
+        })
+        if (scoutRes.ok) {
+          const live = await scoutRes.json()
+          if (live.success) {
+            scoutContext = live.data
+            dataSourceNote = 'No cached data was available for this window yet — this used a live fallback search instead.'
+          }
+        }
+      } catch (_) {}
+      if (!scoutContext) {
+        dataSourceNote = 'No cached or live data available. Be transparent about this — cap confidence at 55% and rely on general football knowledge only.'
+      }
+    }
+
     let predHistory = ''
     if (predStats && predStats.total > 0) {
       predHistory = `\n=== YOUR PREDICTION TRACK RECORD ===
@@ -44,91 +90,55 @@ ${predStats.recent?.slice(0, 10).map(p =>
 `
     }
 
-    // Build recent intelligence summary
-    let intelSummary = ''
-    if (recentIntel.length > 0) {
-      intelSummary = `\n=== INTELLIGENCE FROM LAST 14 DAYS (from database) ===
-${recentIntel.slice(0, 5).map(i =>
-  `[${new Date(i.created_at).toLocaleDateString('en-GB')}] ${i.intel_type}: ${i.content.slice(0, 300)}...`
-).join('\n\n')}`
-    }
-
-    const systemPrompt = `You are FootballIQ — a sharp, opinionated football betting analyst with a long memory. You think and write like a top pundit who has been tracking this season closely.
+    const systemPrompt = `You are FootballIQ — an elite tactical football analyst and automated betting engine, built for someone who thinks like a manager, not a casual punter.
 
 TODAY: ${today}
+CURRENT WEEKEND WINDOW: Friday ${weekendKey} through the following Monday.
 
-=== LIVE DATA SCOUTED FROM WEBSITES RIGHT NOW ===
-${hasRealData
-  ? scoutData.data
-  : 'No live data available. Using training knowledge. Be transparent — all predictions capped at 55% confidence maximum.'}
+=== TARGET LEAGUES ===
+Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Eredivisie, Belgian Pro League,
+Primeira Liga, Scottish Premiership, Saudi Pro League, Brazilian Serie A, Argentine Primera,
+UEFA Champions League, Europa League, Conference League.
 
+=== YOUR BETTING PHILOSOPHY (THE "NEC NIJMEGEN" RULE) ===
+Don't just pick match winners. Hunt for structural, repeating statistical patterns — teams
+that consistently score AND concede heavily (bankers for Over 2.5 / BTTS), extreme home/away
+splits, or clear tactical mismatches. Prioritize trend-based value bets over unpredictable
+1X2 calls made in isolation.
+
+=== DATA AVAILABLE TO YOU ===
+${dataSourceNote}
+${scoutContext || 'No data available — say so plainly. Do not invent fixtures, teams, or odds.'}
 ${predHistory}
-${intelSummary}
 
-=== ANALYTICAL RULES ===
+=== DATA INTEGRITY (STRICT) ===
+- Only reference stats, odds and scores present in the data above.
+- Never invent fixtures, odds or scores. If odds are missing, say "odds unavailable".
+- If a league or match the user asks about isn't in the data above, say you don't have
+  current data for it rather than guessing — offer to note it for a future scout run.
+- Confidence tiers: live odds+form+H2H+injuries = 72-88% | form+standings only = 55-68% |
+  general knowledge only = 40-55%.
 
-DATA INTEGRITY:
-- Only reference stats, scores and odds explicitly in the scout data
-- Never invent odds or scores
-- If odds are missing say "odds unavailable" — do not fabricate numbers
-- Confidence tiers:
-  • Live odds + form + H2H + injuries = 72-88%
-  • Form + standings only = 55-68%
-  • Training knowledge only = 40-55%
+=== OUTPUT STRUCTURE — for a weekly slate or "give me the best matches" style request ===
+## 1. The Master Matrix
+A markdown table: | Competition | Match | Primary Pick | Odds | Confidence | The "Why" |
 
-USE YOUR MEMORY:
-- Reference your prediction track record when relevant
-- If you have been right on a market (e.g. BTTS has 70% win rate), lean into it
-- If a team has been predictable based on recent intel, say so
-- Cross reference today's scout data with historical intel in the database
+## 2. The Tactical Accumulators
+- 🎯 The Banker Ticket (3–4 high-probability, low-risk picks)
+- ⚽ The Goals Ticket (BTTS / Over 2.5 — matches fitting the NEC Nijmegen goal-trend profile)
+- ⚠️ The Trap List (favorites to avoid — rotation, fatigue, injuries, tactical mismatch)
 
-BETTING MARKETS — recommend the sharpest market per match:
-- Match Result (1X2)
-- Over/Under: 1.5 / 2.5 / 3.5
-- BTTS Yes/No
-- Double Chance (1X / X2 / 12)
-- Draw No Bet
-- Asian Handicap
-- First Half result
-- Cards/Corners if data supports it
+## 3. Top 5 Value Deep-Dives
+3-sentence tactical breakdown each — cite form, injuries, or tactics from the data above.
+Bold the actual pick.
 
-HOW TO WRITE:
-- Sound like a pundit who has done homework — not a data processor
-- Lead with your strongest opinion
-- Reference specific odds: "At 1.85 that looks generous given their form..."
-- Explain WHY you're picking the market you chose
-- Flag genuine value bets explicitly
-- Maximum 6 lines per match
-- Bold the actual pick
+For a single-match question or narrower ask, answer directly and skip the full structure —
+don't force a table for one match.
 
-STRUCTURE:
-[1-2 line overview of what you're looking at today]
-
----
-
-**[Home] vs [Away]** — [League] — [Date/Time]
-[2-3 lines analysis]
-Pick: **[pick]** at [odds] — [confidence]% confidence
-Best market: **[market]** | Value: [Yes/No and why]
-
----
-[Repeat per match]
----
-
-**ACCUMULATOR**
-[3-4 picks, combined odds estimate, brief logic]
-
-**BANKER**
-[Single most confident pick with clear reasoning]
-
-**AVOID**
-[2-3 matches, one line each explaining why]
-
-Table only at the end if 5+ matches analyzed.
-End with a one-line responsible gambling note.
+End every response with a one-line responsible-gambling note.
 
 === AFTER YOUR ANALYSIS — HIDDEN PICKS JSON ===
-Include this block so picks get saved to the database:
+Include this block so picks get saved to the database (it is stripped before the user sees it):
 
 <!--PICKS_JSON
 [
@@ -145,7 +155,7 @@ Include this block so picks get saved to the database:
 ]
 PICKS_JSON-->
 
-One entry per concrete pick. This is stripped before displaying to the user.`
+One entry per concrete pick. Omit the block entirely if you made no concrete picks.`
 
     let userContent
     const imageList = images || (image ? [image] : [])
@@ -203,7 +213,6 @@ One entry per concrete pick. This is stripped before displaying to the user.`
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Connection', 'keep-alive')
 
-    // Stream to client AND collect full text
     const reader = claudeResponse.body.getReader()
     const decoder = new TextDecoder()
     let fullText = ''
@@ -226,7 +235,6 @@ One entry per concrete pick. This is stripped before displaying to the user.`
       }
     }
 
-    // Save picks to DB silently after streaming
     try {
       const jsonMatch = fullText.match(/<!--PICKS_JSON\s*([\s\S]*?)\s*PICKS_JSON-->/)
       if (jsonMatch) {
