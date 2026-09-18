@@ -1,6 +1,7 @@
 // =============================================================
 // api/db.js — Vercel Postgres database layer
-// Stores predictions, results, intelligence, ELO ratings
+// Stores predictions, results, intelligence, ELO ratings,
+// and (new) per-league weekend scout cache
 // =============================================================
 
 import { sql } from '@vercel/postgres'
@@ -167,7 +168,7 @@ export async function resolvePendingPredictions(results) {
 }
 
 // -------------------------------------------------------
-// INTELLIGENCE
+// INTELLIGENCE (general — used for ad-hoc notes/history)
 // -------------------------------------------------------
 export async function saveIntelligence(type, league, team, content, matchDate = null) {
   try {
@@ -191,6 +192,62 @@ export async function getRecentIntelligence(days = 14) {
     return result.rows
   } catch (e) {
     console.log('getIntelligence error:', e.message)
+    return []
+  }
+}
+
+// -------------------------------------------------------
+// WEEKEND SCOUT CACHE
+// Reuses the `intelligence` table — intel_type distinguishes
+// 'weekend_scout' (Friday morning: fixtures/odds/form/standings)
+// from 'injury_news' (Friday evening: confirmed team news only)
+// match_date stores the WEEKEND KEY (the Friday date), not a
+// specific fixture date — it's how we group "this weekend's data".
+// -------------------------------------------------------
+
+// Given any date, returns the Friday (YYYY-MM-DD) that anchors
+// the current or nearest-upcoming Fri→Mon weekend window.
+export function getWeekendKey(date = new Date()) {
+  const d = new Date(date)
+  const day = d.getDay() // 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+  let offset
+  if (day === 5) offset = 0        // Friday itself
+  else if (day === 6) offset = -1  // Saturday -> Friday was yesterday
+  else if (day === 0) offset = -2  // Sunday -> Friday was 2 days ago
+  else if (day === 1) offset = -3  // Monday -> Friday was 3 days ago
+  else offset = 5 - day            // Tue/Wed/Thu -> upcoming Friday
+  const friday = new Date(d)
+  friday.setDate(d.getDate() + offset)
+  return friday.toISOString().split('T')[0]
+}
+
+export async function saveScoutData(league, mode, content, weekendKey) {
+  const intelType = mode === 'full' ? 'weekend_scout' : 'injury_news'
+  try {
+    await sql`
+      INSERT INTO intelligence (intel_type, league, team, content, match_date)
+      VALUES (${intelType}, ${league}, NULL, ${content}, ${weekendKey})
+    `
+  } catch (e) {
+    console.log('saveScoutData error:', e.message)
+  }
+}
+
+// Returns the latest weekend_scout + injury_news row per league
+// for the given weekend key.
+export async function getWeekendScoutData(weekendKey) {
+  try {
+    const result = await sql`
+      SELECT DISTINCT ON (league, intel_type)
+        league, intel_type, content, created_at
+      FROM intelligence
+      WHERE match_date = ${weekendKey}
+      AND intel_type IN ('weekend_scout', 'injury_news')
+      ORDER BY league, intel_type, created_at DESC
+    `
+    return result.rows
+  } catch (e) {
+    console.log('getWeekendScoutData error:', e.message)
     return []
   }
 }
