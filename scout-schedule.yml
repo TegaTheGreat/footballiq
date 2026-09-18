@@ -1,0 +1,48 @@
+name: FootballIQ Weekend Scout
+
+on:
+  schedule:
+    # Friday 07:00 WAT (Lagos, UTC+1) = 06:00 UTC — full scout: fixtures/odds/form/standings
+    - cron: '0 6 * * 5'
+    # Friday 18:00 WAT = 17:00 UTC — news-only pass: confirmed injuries/team news
+    - cron: '0 17 * * 5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'full or news'
+        required: true
+        default: 'full'
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine mode from trigger time
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 6 * * 5" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=news" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Scout each league, staggered
+        env:
+          BASE_URL: ${{ secrets.VERCEL_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          leagues=(epl ucl uel uecl laliga bundesliga seriea ligue1 eredivisie belgian primeira scottish saudi brazil argentina)
+
+          for league in "${leagues[@]}"; do
+            echo "Scouting $league (mode=$MODE)..."
+            curl -sS -X GET \
+              "$BASE_URL/api/scout-league?league=$league&mode=$MODE" \
+              -H "x-cron-secret: $CRON_SECRET" \
+              --max-time 55 \
+              -w "\n  -> HTTP %{http_code}, %{time_total}s\n" \
+              || echo "  -> request failed, continuing to next league"
+            sleep 15
+          done
