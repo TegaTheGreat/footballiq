@@ -32,10 +32,25 @@ export const LEAGUES = {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
 
-  const secret = req.headers['x-cron-secret']
-  if (!secret || secret !== process.env.CRON_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' })
-  }
+const crypto = await import('crypto')
+const hash = (v) => v ? crypto.createHash('sha256').update(v).digest('hex').slice(0, 8) : null
+
+const secret = req.headers['x-cron-secret']
+const expected = process.env.CRON_SECRET
+
+if (!secret || secret !== expected) {
+  return res.status(401).json({
+    error: 'Unauthorized',
+    debug: {
+      headerReceived: !!secret,
+      headerLength: secret ? secret.length : 0,
+      headerHashPrefix: hash(secret),
+      envVarSet: !!expected,
+      envVarLength: expected ? expected.length : 0,
+      envVarHashPrefix: hash(expected),
+    }
+  })
+}
 
   const { league, mode } = req.query
   const leagueName = LEAGUES[league]
